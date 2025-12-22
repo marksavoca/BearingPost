@@ -8,6 +8,21 @@ from stl import mesh
 import math
 import trimesh
 
+# Try to import optional text rendering libraries
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+try:
+    import freetype
+    from shapely.geometry import Polygon, MultiPolygon
+    from shapely.ops import unary_union
+    FREETYPE_AVAILABLE = True
+except ImportError:
+    FREETYPE_AVAILABLE = False
+
 
 class DirectionSignGenerator:
     """Generates 3D models for direction signs."""
@@ -24,7 +39,12 @@ class DirectionSignGenerator:
                  flat_height: float = 28.0,
                  arrow_length: float = 15.0,
                  arrow_width: float = 8.0,
-                 sign_spacing: float = 36.0):
+                 sign_spacing: float = 36.0,
+                 sign_clearance: float = 2.0,
+                 max_sign_length: float = 200.0,
+                 min_font_size: float = 10.0,
+                 max_font_size: float = 20.0,
+                 text_height: float = 1.0):
         """
         Initialize the sign generator with dimensions (all in mm).
         
@@ -41,6 +61,11 @@ class DirectionSignGenerator:
             arrow_length: Length of the north arrow
             arrow_width: Width of the north arrow at base
             sign_spacing: Vertical spacing between signs (center to center)
+            sign_clearance: Vertical clearance between sign and flat edges
+            max_sign_length: Maximum length of a sign plate
+            min_font_size: Minimum font size for text
+            max_font_size: Maximum font size for text
+            text_height: Height of embossed text (mm)
         """
         self.post_height = post_height
         self.post_radius = post_radius
@@ -54,6 +79,11 @@ class DirectionSignGenerator:
         self.arrow_length = arrow_length
         self.arrow_width = arrow_width
         self.sign_spacing = sign_spacing
+        self.sign_clearance = sign_clearance
+        self.max_sign_length = max_sign_length
+        self.min_font_size = min_font_size
+        self.max_font_size = max_font_size
+        self.text_height = text_height
     
     def generate_post(self, bearings: List[float], output_path: str):
         """
@@ -323,6 +353,129 @@ class DirectionSignGenerator:
         
         return box
     
+    def _create_text_mesh_vector(self, text: str, font_size: float, position: Tuple[float, float, float]) -> trimesh.Trimesh:
+        """
+        Create high-quality vector-based 3D text mesh using FreeType.
+        
+        Args:
+            text: Text to render (will be converted to uppercase)
+            font_size: Font size in mm
+            position: (x, y, z) position for the text
+            
+        Returns:
+            trimesh.Trimesh: 3D text mesh
+        """
+        if not FREETYPE_AVAILABLE:
+            raise ImportError("freetype-py and shapely required for vector text")
+        
+        # Convert to uppercase to avoid descenders
+        text = text.upper()
+        
+        # Font paths to try
+        font_paths = [
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/HelveticaNeue.ttc",
+            "C:\\Windows\\Fonts\\arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+        
+        face = None
+        for font_path in font_paths:
+            try:
+                face = freetype.Face(font_path)
+                break
+            except:
+                continue
+        
+        if face is None:
+            raise RuntimeError("Could not load any system font")
+        
+        # Set font size (FreeType uses 1/64th of a point)
+        face.set_char_size(int(font_size * 64))
+        
+        # Collect all character polygons
+        all_polygons = []
+        pen_x = 0
+        
+        for char in text:
+            face.load_char(char, freetype.FT_LOAD_DEFAULT)
+            glyph = face.glyph
+            outline = glyph.outline
+            
+            if len(outline.points) > 0:
+                # Convert outline points
+                points = [(pt[0] / 64.0 + pen_x, pt[1] / 64.0) for pt in outline.points]
+                
+                # Process contours - need to handle holes properly
+                start = 0
+                char_polygons = []
+                for end in outline.contours:
+                    contour_points = points[start:end+1]
+                    if len(contour_points) >= 3:
+                        try:
+                            poly = Polygon(contour_points)
+                            if poly.is_valid:
+                                char_polygons.append(poly)
+                        except:
+                            pass
+                    start = end + 1
+                
+                # Separate exterior and holes based on area/orientation
+                if char_polygons:
+                    # The largest polygon is typically the exterior
+                    char_polygons.sort(key=lambda p: abs(p.area), reverse=True)
+                    if char_polygons:
+                        exterior = char_polygons[0]
+                        holes = [p for p in char_polygons[1:] if p.within(exterior)]
+                        
+                        # Create polygon with holes
+                        if holes:
+                            try:
+                                # Subtract holes from exterior
+                                result = exterior
+                                for hole in holes:
+                                    result = result.difference(hole)
+                                all_polygons.append(result)
+                            except:
+                                all_polygons.append(exterior)
+                        else:
+                            all_polygons.append(exterior)
+            
+            # Advance pen position
+            pen_x += glyph.advance.x / 64.0
+        
+        if not all_polygons:
+            raise ValueError(f"No valid geometry generated for text: {text}")
+        
+        # Convert to trimesh
+        meshes = []
+        for poly in all_polygons:
+            # Handle both Polygon and MultiPolygon
+            if isinstance(poly, MultiPolygon):
+                poly_list = list(poly.geoms)
+            else:
+                poly_list = [poly]
+            
+            for p in poly_list:
+                if p.is_valid and not p.is_empty:
+                    try:
+                        # Extrude the 2D polygon to 3D
+                        text_mesh = trimesh.creation.extrude_polygon(p, height=self.text_height)
+                        meshes.append(text_mesh)
+                    except:
+                        pass
+        
+        if not meshes:
+            raise ValueError(f"Failed to create 3D mesh for text: {text}")
+        
+        # Combine all character meshes
+        result = trimesh.util.concatenate(meshes)
+        
+        # Position the text
+        result.apply_translation([position[0], position[1], position[2]])
+        
+        return result
+    
     def generate_base(self, output_path: str):
         """
         Generate the base with a north arrow indicator.
@@ -456,15 +609,162 @@ class DirectionSignGenerator:
     def generate_sign(self, text: str, distance: str, output_path: str):
         """
         Generate a directional sign plate with text.
+        Creates a pointed sign (arrow end) with text embossed on it.
+        Sign height is flat_height - clearance to fit within the flat indent.
         
         Args:
             text: Location name to display
             distance: Distance text to display
             output_path: Path to save the STL file
         """
-        # TODO: Implement sign plate generation with embossed/debossed text
         print(f"Generating sign for '{text}' ({distance})...")
-        print(f"  Output: {output_path}")
+        
+        # Calculate sign dimensions
+        sign_height = self.flat_height - (2 * self.sign_clearance)
+        
+        # Start with maximum font size for main text
+        font_size = min(self.max_font_size, sign_height * 0.8)
+        
+        # Estimate text widths more accurately with tighter estimates
+        # Main text: ~0.55 * font_size per character (tighter estimate)
+        # Distance text: 50% of main font size (reduced from 60% to save space)
+        main_text_width = len(text) * font_size * 0.55
+        dist_text_width = len(distance) * font_size * 0.5 * 0.55 if distance else 0
+        
+        # Calculate minimum sign length needed with minimal padding
+        padding = 12  # Minimal total padding
+        gap = 5  # Minimal gap between texts
+        min_required_length = main_text_width + dist_text_width + padding + gap
+        
+        # Try to fit at max font size first
+        if min_required_length <= self.max_sign_length:
+            sign_length = min(min_required_length + 10, self.max_sign_length)  # Add a bit of buffer
+        else:
+            # Need to reduce font size to fit within max_sign_length
+            sign_length = self.max_sign_length
+            available_width = sign_length - padding - gap
+            required_width = main_text_width + dist_text_width
+            scale_factor = available_width / required_width
+            font_size = font_size * scale_factor
+            font_size = max(self.min_font_size, font_size)
+        
+        # Minimum practical length
+        if sign_length < 60:
+            sign_length = 60
+        
+        print(f"  Sign dimensions: {sign_length:.1f}mm long × {sign_height:.1f}mm tall × {self.sign_thickness:.1f}mm thick")
+        print(f"  Font size: {font_size:.1f}mm")
+        
+        # Create the basic sign shape (pointed on one end, square on the other)
+        # The pointed end will aim toward the location
+        point_length = sign_height * 0.5  # Point extends half the sign height
+        
+        vertices = []
+        
+        # Square end (attaches to post) at X=0
+        # Bottom left
+        vertices.append([0, 0, 0])
+        # Bottom right
+        vertices.append([0, sign_height, 0])
+        # Top right
+        vertices.append([0, sign_height, self.sign_thickness])
+        # Top left
+        vertices.append([0, 0, self.sign_thickness])
+        
+        # Body rectangle extends to near the end
+        body_length = sign_length - point_length
+        # Bottom left
+        vertices.append([body_length, 0, 0])
+        # Bottom right
+        vertices.append([body_length, sign_height, 0])
+        # Top right
+        vertices.append([body_length, sign_height, self.sign_thickness])
+        # Top left
+        vertices.append([body_length, 0, self.sign_thickness])
+        
+        # Pointed end - tip at center height
+        tip_y = sign_height / 2  # Point at center
+        # Tip vertex (shared by all point faces)
+        vertices.append([sign_length, tip_y, 0])  # Bottom tip (index 8)
+        vertices.append([sign_length, tip_y, self.sign_thickness])  # Top tip (index 9)
+        
+        # Define faces
+        faces = []
+        
+        # Square end face (vertices 0,1,2,3)
+        faces.extend([[0, 2, 1], [0, 3, 2]])
+        
+        # Body rectangular faces
+        # Bottom face of rectangle
+        faces.extend([[0, 1, 5], [0, 5, 4]])
+        # Top face of rectangle
+        faces.extend([[3, 6, 2], [3, 7, 6]])
+        # Left side of rectangle
+        faces.extend([[0, 4, 7], [0, 7, 3]])
+        # Right side of rectangle
+        faces.extend([[1, 2, 6], [1, 6, 5]])
+        
+        # Triangular point - 4 faces connecting rectangle end to tip
+        # Bottom face: left-bottom (4), right-bottom (5), tip-bottom (8)
+        faces.append([4, 5, 8])
+        # Top face: left-top (7), tip-top (9), right-top (6)
+        faces.append([7, 9, 6])
+        # Left face: left-bottom (4), tip-bottom (8), tip-top (9), left-top (7)
+        faces.extend([[4, 8, 9], [4, 9, 7]])
+        # Right face: right-bottom (5), right-top (6), tip-top (9), tip-bottom (8)
+        faces.extend([[5, 6, 9], [5, 9, 8]])
+        
+        # Create base sign mesh using trimesh for easier text operations
+        vertices_array = np.array(vertices)
+        faces_array = np.array(faces)
+        
+        sign_base = trimesh.Trimesh(vertices=vertices_array, faces=faces_array)
+        
+        # Add embossed text using vector-based rendering
+        if not FREETYPE_AVAILABLE:
+            print(f"  Warning: freetype-py not installed - text embossing unavailable")
+            print(f"  Install with: pip install freetype-py shapely")
+            sign_mesh = sign_base
+        else:
+            try:
+                print(f"  Creating high-quality vector text...")
+                
+                # Create main text mesh
+                # Position: left-justified (near square end)
+                text_x = body_length * 0.05  # 5% from left edge (square end)
+                text_y = (sign_height - font_size) / 2
+                text_z = self.sign_thickness
+                
+                text_mesh = self._create_text_mesh_vector(text, font_size, (text_x, text_y, text_z))
+                
+                # Create distance text if provided
+                if distance:
+                    dist_font_size = font_size * 0.5
+                    # Position near right edge (pointed end)
+                    dist_text_width = len(distance) * dist_font_size * 0.55
+                    dist_x = body_length * 0.95 - dist_text_width  # Right-justify near arrow
+                    dist_y = (sign_height - dist_font_size) / 2
+                    dist_z = self.sign_thickness
+                    
+                    distance_mesh = self._create_text_mesh_vector(distance, dist_font_size, (dist_x, dist_y, dist_z))
+                    
+                    # Combine all meshes
+                    sign_mesh = trimesh.util.concatenate([sign_base, text_mesh, distance_mesh])
+                    print(f"  Text embossed: '{text}' + '{distance}'")
+                else:
+                    sign_mesh = trimesh.util.concatenate([sign_base, text_mesh])
+                    print(f"  Text embossed: '{text}'")
+                
+            except Exception as e:
+                import traceback
+                print(f"  Warning: Could not create vector text: {e}")
+                print(f"  Details: {traceback.format_exc()}")
+                print(f"  Saving blank sign")
+                sign_mesh = sign_base
+        
+        # Export
+        sign_mesh.export(output_path)
+        print(f"  Saved: {output_path}")
     
     def generate_arrow(self, output_path: str):
         """

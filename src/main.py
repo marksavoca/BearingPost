@@ -32,13 +32,13 @@ HOME = Location(
 
 # Destinations to point to
 LOCATIONS = [
-    Location("Albany, NY (Guilderland HS)", 42.697749760384546, -73.96640153872819, font="Arial", color="blue"),
-    Location("Wharton, NJ (136 E Central)", 40.89469275367825, -74.57707989642749, font="Arial", color="green"),
-    Location("Stone Harbor, NJ (Water Tower)", 39.05421572551508, -74.75888740116326, font="Arial", color="teal"),
+    Location("Albany, NY", 42.697749760384546, -73.96640153872819, font="Arial", color="blue"),
+    Location("Wharton, NJ", 40.89469275367825, -74.57707989642749, font="Arial", color="green"),
+    Location("Stone Harbor, NJ", 39.05421572551508, -74.75888740116326, font="Arial", color="teal"),
     Location("Rome, Italy", 41.9028, 12.4964, font="Arial", color="red"),
-    Location("Boston, MA (NEU)", 42.33813538280124, -71.09011637177542, font="Arial", color="maroon"),
-    Location("Philadelphia, PA (1226 Ellsworth)", 39.93617180632561, -75.16416042623342, font="Arial", color="orange"),
-    Location("Los Angeles, CA (UCLA Lab)", 34.06965322948626, -118.44078368287897, font="Arial", color="purple"),
+    Location("Boston, MA", 42.33813538280124, -71.09011637177542, font="Arial", color="maroon"),
+    Location("Philadelphia, PA", 39.93617180632561, -75.16416042623342, font="Arial", color="orange"),
+    Location("Los Angeles, CA", 34.06965322948626, -118.44078368287897, font="Arial", color="purple"),
 ]
 
 
@@ -67,7 +67,7 @@ def main():
     print("=" * 70)
     
     for loc in LOCATIONS:
-        distance_str = format_distance(loc.distance_km)
+        distance_str = format_distance(loc.distance_km, units='mi')
         bearing_str = f"{loc.bearing:.1f}°"
         print(f"{loc.name:<35} {distance_str:<20} {bearing_str:<15} {loc.font:<10} {loc.color:<10}")
     
@@ -91,12 +91,24 @@ def main():
     post_path = os.path.join(output_dir, "post.stl")
     generator.generate_post(bearings, post_path)
     
+    # Generate individual sign plates for each location
+    print("\nGenerating sign plates...")
+    for i, loc in enumerate(LOCATIONS):
+        sign_filename = f"sign_{i+1}_{loc.name.replace(' ', '_').replace(',', '')}.stl"
+        sign_path = os.path.join(output_dir, sign_filename)
+        distance_str = format_distance(loc.distance_km, units='mi')
+        generator.generate_sign(loc.name, distance_str, sign_path)
+    
     print("\n" + "=" * 70)
     print("\nGeneration complete!")
     print(f"Files saved to: {output_dir}")
+    print("\nGenerated files:")
+    print(f"  - base.stl (base with north arrow)")
+    print(f"  - post.stl (two-piece post with flat indents)")
+    print(f"  - sign_*.stl ({len(LOCATIONS)} sign plates)")
     print("\nNext steps:")
-    print("1. Generate sign plates with text for each location")
-    print("2. 3D print the components")
+    print("1. 3D print the components")
+    print("2. Attach signs to the post at the flat surfaces")
     print("3. Assemble the directional sign")
 
 

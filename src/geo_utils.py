@@ -63,19 +63,28 @@ def calculate_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     return (bearing_deg + 360) % 360
 
 
-def format_distance(distance_km: float) -> str:
+def format_distance(distance_km: float, units: str = 'mi') -> str:
     """
     Format distance in a human-readable way.
     
     Args:
         distance_km: Distance in kilometers
+        units: 'mi' for miles, 'km' for kilometers, 'both' for both
     
     Returns:
-        Formatted string (e.g., "1,234 km" or "5,678 mi")
+        Formatted string (e.g., "1,234 mi" or "5,678 km")
     """
     distance_mi = distance_km * 0.621371
     
-    if distance_km < 1000:
-        return f"{distance_km:.0f} km"
-    else:
+    if units == 'mi':
+        if distance_mi < 10:
+            return f"{distance_mi:.1f} mi"
+        else:
+            return f"{distance_mi:,.0f} mi"
+    elif units == 'km':
+        if distance_km < 10:
+            return f"{distance_km:.1f} km"
+        else:
+            return f"{distance_km:,.0f} km"
+    else:  # both
         return f"{distance_km:,.0f} km ({distance_mi:,.0f} mi)"
