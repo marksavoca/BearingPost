@@ -371,11 +371,14 @@ class DirectionSignGenerator:
         # Convert to uppercase to avoid descenders
         text = text.upper()
         
-        # Font paths to try
+        # Font paths to try (prefer bold variants)
         font_paths = [
-            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",  # Try to load bold face from collection
             "/System/Library/Fonts/HelveticaNeue.ttc",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "C:\\Windows\\Fonts\\arialbd.ttf",  # Arial Bold on Windows
             "C:\\Windows\\Fonts\\arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ]
         
@@ -383,6 +386,19 @@ class DirectionSignGenerator:
         for font_path in font_paths:
             try:
                 face = freetype.Face(font_path)
+                # For TTC files (font collections), try to select a bold face
+                if font_path.endswith('.ttc'):
+                    # Try to find a bold face in the collection
+                    for face_index in range(face.num_faces):
+                        try:
+                            test_face = freetype.Face(font_path, face_index)
+                            face_name = test_face.family_name.decode('utf-8').lower() if hasattr(test_face.family_name, 'decode') else str(test_face.family_name).lower()
+                            style_name = test_face.style_name.decode('utf-8').lower() if hasattr(test_face.style_name, 'decode') else str(test_face.style_name).lower()
+                            if 'bold' in face_name or 'bold' in style_name:
+                                face = test_face
+                                break
+                        except:
+                            continue
                 break
             except:
                 continue
@@ -391,6 +407,10 @@ class DirectionSignGenerator:
             raise RuntimeError("Could not load any system font")
         
         # Set font size (FreeType uses 1/64th of a point)
+        # Minimum font size to avoid division by zero errors
+        if font_size < 3.0:
+            raise ValueError(f"Font size {font_size} too small (minimum 3.0mm)")
+        
         face.set_char_size(int(font_size * 64))
         
         # Collect all character polygons
@@ -398,7 +418,7 @@ class DirectionSignGenerator:
         pen_x = 0
         
         for char in text:
-            face.load_char(char, freetype.FT_LOAD_DEFAULT)
+            face.load_char(char, freetype.FT_LOAD_NO_BITMAP)
             glyph = face.glyph
             outline = glyph.outline
             
@@ -411,12 +431,17 @@ class DirectionSignGenerator:
                 char_polygons = []
                 for end in outline.contours:
                     contour_points = points[start:end+1]
+                    # Need at least 3 points for a valid polygon
                     if len(contour_points) >= 3:
                         try:
+                            # Close the contour if needed
+                            if contour_points[0] != contour_points[-1]:
+                                contour_points.append(contour_points[0])
+                            
                             poly = Polygon(contour_points)
-                            if poly.is_valid:
+                            if poly.is_valid and poly.area > 1e-9:  # Filter out degenerate polygons
                                 char_polygons.append(poly)
-                        except:
+                        except Exception as e:
                             pass
                     start = end + 1
                 
@@ -426,19 +451,26 @@ class DirectionSignGenerator:
                     char_polygons.sort(key=lambda p: abs(p.area), reverse=True)
                     if char_polygons:
                         exterior = char_polygons[0]
-                        holes = [p for p in char_polygons[1:] if p.within(exterior)]
                         
-                        # Create polygon with holes
-                        if holes:
-                            try:
-                                # Subtract holes from exterior
-                                result = exterior
-                                for hole in holes:
-                                    result = result.difference(hole)
-                                all_polygons.append(result)
-                            except:
+                        # For simple characters (like comma, period), just use the exterior
+                        # For complex characters, identify and subtract holes
+                        if len(char_polygons) > 1:
+                            holes = [p for p in char_polygons[1:] if p.within(exterior)]
+                            
+                            # Create polygon with holes
+                            if holes:
+                                try:
+                                    # Subtract holes from exterior
+                                    result = exterior
+                                    for hole in holes:
+                                        result = result.difference(hole)
+                                    all_polygons.append(result)
+                                except:
+                                    all_polygons.append(exterior)
+                            else:
                                 all_polygons.append(exterior)
                         else:
+                            # Single contour - just add it
                             all_polygons.append(exterior)
             
             # Advance pen position
@@ -457,12 +489,14 @@ class DirectionSignGenerator:
                 poly_list = [poly]
             
             for p in poly_list:
-                if p.is_valid and not p.is_empty:
+                if p.is_valid and not p.is_empty and p.area > 1e-6:  # Skip tiny polygons
                     try:
                         # Extrude the 2D polygon to 3D
                         text_mesh = trimesh.creation.extrude_polygon(p, height=self.text_height)
-                        meshes.append(text_mesh)
-                    except:
+                        if text_mesh is not None and len(text_mesh.vertices) > 0:
+                            meshes.append(text_mesh)
+                    except Exception as e:
+                        print(f"      Warning: Could not extrude polygon (area={p.area:.2f}): {e}")
                         pass
         
         if not meshes:
@@ -622,42 +656,100 @@ class DirectionSignGenerator:
         # Calculate sign dimensions
         sign_height = self.flat_height - (2 * self.sign_clearance)
         
+        # Create the basic sign shape parameters
+        point_length = sign_height * 0.5  # Point extends half the sign height
+        
         # Start with maximum font size for main text
         font_size = min(self.max_font_size, sign_height * 0.8)
         
-        # Estimate text widths more accurately with tighter estimates
-        # Main text: ~0.55 * font_size per character (tighter estimate)
-        # Distance text: 50% of main font size (reduced from 60% to save space)
-        main_text_width = len(text) * font_size * 0.55
-        dist_text_width = len(distance) * font_size * 0.5 * 0.55 if distance else 0
+        # Calculate text widths
+        # Uppercase text is wider, use better estimate: ~0.6 * font_size per character
+        main_text_len = len(text.upper())
         
-        # Calculate minimum sign length needed with minimal padding
-        padding = 12  # Minimal total padding
-        gap = 5  # Minimal gap between texts
-        min_required_length = main_text_width + dist_text_width + padding + gap
+        # Distance will be stacked: number over "MI"
+        # Extract just the number from distance (e.g., "214 mi" -> "214")
+        dist_number = distance.split()[0] if distance else ""
+        dist_text_len = len(dist_number)  # Just the number
         
-        # Try to fit at max font size first
-        if min_required_length <= self.max_sign_length:
-            sign_length = min(min_required_length + 10, self.max_sign_length)  # Add a bit of buffer
+        # Distance font is 50% of main
+        dist_font_size = font_size * 0.5
+        
+        # Minimum readable sizes
+        min_main_font = 12.0  # Main text must be at least 12mm
+        min_dist_font = 6.0   # Distance must be at least 6mm
+        min_mi_font = 7.0     # MI text minimum (FreeType seems to fail below ~6.5mm)
+        
+        # Padding: main text 5% from left, distance 3% from right (closer to point)
+        left_padding_pct = 0.05
+        right_padding_pct = 0.03
+        min_gap = 5.0  # Minimum gap between texts
+        
+        # Try different strategies to fit text
+        # Strategy 1: Try at max sign length with max font size
+        sign_length = self.max_sign_length
+        body_length = sign_length - point_length
+        
+        main_text_width = main_text_len * font_size * 0.6
+        # Distance is now just the number (narrower than "214 mi")
+        dist_text_width = max(dist_text_len * dist_font_size * 0.6, 2 * dist_font_size * 0.6) if distance else 0  # At least as wide as "MI"
+        
+        left_padding = body_length * left_padding_pct
+        right_padding = body_length * right_padding_pct
+        available_width = body_length - left_padding - right_padding
+        needed_width = main_text_width + min_gap + dist_text_width
+        
+        if needed_width <= available_width:
+            # Fits perfectly at max font size!
+            pass
         else:
-            # Need to reduce font size to fit within max_sign_length
-            sign_length = self.max_sign_length
-            available_width = sign_length - padding - gap
-            required_width = main_text_width + dist_text_width
-            scale_factor = available_width / required_width
+            # Strategy 2: Reduce font size proportionally to fit within max length
+            scale_factor = available_width / needed_width
             font_size = font_size * scale_factor
-            font_size = max(self.min_font_size, font_size)
+            dist_font_size = font_size * 0.5
+            
+            # Check if we're below minimum readable size
+            # MI text will be 80% of distance font, so ensure it won't drop below 3mm
+            mi_font_check = dist_font_size * 0.8
+            if font_size < min_main_font or (distance and (dist_font_size < min_dist_font or mi_font_check < min_mi_font)):
+                # Strategy 3: Drop distance text and maximize main text
+                font_size = min(self.max_font_size, sign_height * 0.8)
+                main_text_width = main_text_len * font_size * 0.6
+                
+                if main_text_width + left_padding + right_padding <= body_length:
+                    # Main text fits at max size without distance
+                    distance = None  # Drop distance
+                    print(f"  Note: Distance text omitted to maintain readable main text size")
+                else:
+                    # Even main text needs to be smaller
+                    scale_factor = (body_length - left_padding - right_padding) / main_text_width
+                    font_size = font_size * scale_factor
+                    font_size = max(min_main_font, font_size)
+                    distance = None  # Drop distance
+                    print(f"  Note: Distance text omitted and main text reduced to fit")
+                
+                dist_font_size = 0
+        
+        # Final calculations
+        main_text_width = main_text_len * font_size * 0.6
+        dist_text_width = max(dist_text_len * dist_font_size * 0.6, 2 * dist_font_size * 0.6) if distance else 0
+        
+        # Clamp font size
+        font_size = max(self.min_font_size, min(font_size, self.max_font_size))
+        if distance:
+            dist_font_size = font_size * 0.5
         
         # Minimum practical length
         if sign_length < 60:
             sign_length = 60
         
+        # Final body_length calculation
+        body_length = sign_length - point_length
+        
         print(f"  Sign dimensions: {sign_length:.1f}mm long × {sign_height:.1f}mm tall × {self.sign_thickness:.1f}mm thick")
-        print(f"  Font size: {font_size:.1f}mm")
+        print(f"  Font size: {font_size:.1f}mm" + (f" (distance: {dist_font_size:.1f}mm)" if distance else ""))
         
         # Create the basic sign shape (pointed on one end, square on the other)
         # The pointed end will aim toward the location
-        point_length = sign_height * 0.5  # Point extends half the sign height
         
         vertices = []
         
@@ -730,27 +822,59 @@ class DirectionSignGenerator:
                 print(f"  Creating high-quality vector text...")
                 
                 # Create main text mesh
-                # Position: left-justified (near square end)
+                # Position: left-justified (near square end), vertically centered
+                # Add extra offset to account for font baseline and any descenders
                 text_x = body_length * 0.05  # 5% from left edge (square end)
-                text_y = (sign_height - font_size) / 2
+                text_y = (sign_height / 2) - (font_size / 2.8)  # Adjusted for baseline offset
                 text_z = self.sign_thickness
                 
                 text_mesh = self._create_text_mesh_vector(text, font_size, (text_x, text_y, text_z))
                 
-                # Create distance text if provided
+                # Create distance text if provided (stacked: number over "MI")
                 if distance:
                     dist_font_size = font_size * 0.5
-                    # Position near right edge (pointed end)
-                    dist_text_width = len(distance) * dist_font_size * 0.55
-                    dist_x = body_length * 0.95 - dist_text_width  # Right-justify near arrow
-                    dist_y = (sign_height - dist_font_size) / 2
-                    dist_z = self.sign_thickness
                     
-                    distance_mesh = self._create_text_mesh_vector(distance, dist_font_size, (dist_x, dist_y, dist_z))
-                    
-                    # Combine all meshes
-                    sign_mesh = trimesh.util.concatenate([sign_base, text_mesh, distance_mesh])
-                    print(f"  Text embossed: '{text}' + '{distance}'")
+                    # Check if distance font size is too small
+                    # Also check that MI font size (80% of distance) won't be too small
+                    mi_font_size = dist_font_size * 0.8
+                    if dist_font_size < 3.0 or mi_font_size < 3.0:
+                        print(f"  Warning: Distance text too small (number: {dist_font_size:.1f}mm, MI: {mi_font_size:.1f}mm), skipping distance")
+                        sign_mesh = trimesh.util.concatenate([sign_base, text_mesh])
+                        print(f"  Text embossed: '{text}' (distance omitted - too small)")
+                    else:
+                        try:
+                            # Extract just the number from distance
+                            dist_number = distance.split()[0]
+                            
+                            print(f"  Debug: Rendering distance number '{dist_number}' at {dist_font_size:.1f}mm")
+                            
+                            # Create number text (top line)
+                            dist_num_width = len(dist_number) * dist_font_size * 0.6
+                            dist_x = body_length * 0.97 - max(dist_num_width, 2 * dist_font_size * 0.6)
+                            
+                            # Position number in upper part of sign (adjusted for baseline)
+                            dist_num_y = (sign_height / 2) + (dist_font_size * 0.2)  # Upper half, baseline adjusted
+                            dist_num_z = self.sign_thickness
+                            
+                            distance_num_mesh = self._create_text_mesh_vector(dist_number, dist_font_size, (dist_x, dist_num_y, dist_num_z))
+                            
+                            print(f"  Debug: Rendering 'MI' at {mi_font_size:.1f}mm")
+                            
+                            # Create "MI" text (bottom line) - smaller
+                            mi_width = 2 * mi_font_size * 0.6
+                            mi_x = dist_x + (max(dist_num_width, mi_width) - mi_width) / 2  # Center "MI" under number
+                            mi_y = (sign_height / 2) - (mi_font_size * 1.1)  # Lower half, baseline adjusted
+                            mi_z = self.sign_thickness
+                            
+                            distance_mi_mesh = self._create_text_mesh_vector("MI", mi_font_size, (mi_x, mi_y, mi_z))
+                            
+                            # Combine all meshes
+                            sign_mesh = trimesh.util.concatenate([sign_base, text_mesh, distance_num_mesh, distance_mi_mesh])
+                            print(f"  Text embossed: '{text}' + '{distance}' (stacked)")
+                        except Exception as dist_error:
+                            print(f"  Warning: Distance text failed ({dist_error}), using main text only")
+                            sign_mesh = trimesh.util.concatenate([sign_base, text_mesh])
+                            print(f"  Text embossed: '{text}' (distance failed)")
                 else:
                     sign_mesh = trimesh.util.concatenate([sign_base, text_mesh])
                     print(f"  Text embossed: '{text}'")
