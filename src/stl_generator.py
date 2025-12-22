@@ -20,7 +20,7 @@ class DirectionSignGenerator:
                  sign_width: float = 100.0,
                  sign_height: float = 20.0,
                  sign_thickness: float = 3.0,
-                 flat_depth: float = 2.0,
+                 flat_depth: float = 3.0,
                  flat_height: float = 28.0,
                  arrow_length: float = 15.0,
                  arrow_width: float = 8.0,
@@ -57,85 +57,126 @@ class DirectionSignGenerator:
     
     def generate_post(self, bearings: List[float], output_path: str):
         """
-        Generate a simple post with ONE box for testing positioning.
+        Generate two post sections with flat indents at specified bearings.
+        Creates a two-piece design to fit within 210mm print height.
+        Uses boolean subtraction to create flat mounting surfaces.
         
         Args:
             bearings: List of bearings (in degrees) where signs will attach
             output_path: Path to save the STL file
         """
-        print(f"Generating test post with 1 box...")
+        print(f"Generating 2-piece post with {len(bearings)} flat indents...")
         
-        all_vertices = []
-        all_faces = []
+        all_meshes = []
         
-        # ===== CREATE SIMPLE CYLINDER POST =====
+        # Configuration
         segments = 64
-        vertices = []
-        faces = []
+        post_separation = 150.0  # Distance between the two posts when laid side by side
+        max_post_height = 200.0  # Maximum height for each post section
         
-        # Create cylinder vertices (bottom and top rings)
-        for i in range(segments):
-            angle = 2 * math.pi * i / segments
-            x = self.post_radius * math.cos(angle)
-            y = self.post_radius * math.sin(angle)
+        # Calculate sign distribution and heights
+        bottom_start_height = 50.0  # Start first sign 50mm from bottom
+        sign_increment = self.flat_height + 8.0  # flat_height (28mm) + spacing (8mm)
+        top_padding = 8.0  # Spacing above the last sign
+        
+        # Determine how many signs fit on bottom post
+        num_signs_bottom = 0
+        current_height = bottom_start_height
+        while current_height + self.flat_height <= max_post_height and num_signs_bottom < len(bearings):
+            num_signs_bottom += 1
+            current_height += sign_increment
+        
+        # Calculate actual bottom post height (last sign center + half flat height + padding)
+        bottom_post_height = bottom_start_height + (num_signs_bottom - 1) * sign_increment + self.flat_height / 2 + top_padding
+        
+        # Remaining signs go on top post
+        num_signs_top = len(bearings) - num_signs_bottom
+        
+        # Calculate top post height
+        if num_signs_top > 0:
+            # First sign BOTTOM should be at 8mm above Z=0
+            # Since we position by center, center = bottom + flat_height/2
+            top_start_height = 8.0 + self.flat_height / 2  # 8mm (spacing) + 14mm (half flat) = 22mm center
+            # Post height goes from 0 to (last sign center + half flat height + padding)
+            top_post_height = top_start_height + (num_signs_top - 1) * sign_increment + self.flat_height / 2 + top_padding
+        else:
+            top_post_height = 0
+            top_start_height = 0
+        
+        print(f"  Bottom post: {num_signs_bottom} signs, height: {bottom_post_height:.1f}mm")
+        print(f"  Top post: {num_signs_top} signs, height: {top_post_height:.1f}mm")
+        print(f"  Sign increment: {sign_increment:.1f}mm (flat_height {self.flat_height} + spacing 8mm)")
+        
+        # ===== CREATE BOTTOM POST =====
+        print("  Creating bottom post cylinder...")
+        bottom_post_mesh = trimesh.creation.cylinder(
+            radius=self.post_radius,
+            height=bottom_post_height,
+            sections=64
+        )
+        # Trimesh creates cylinder centered at origin, translate to sit on Z=0
+        bottom_post_mesh.apply_translation([0, 0, bottom_post_height / 2])
+        
+        # Subtract boxes for bottom post signs
+        print("  Subtracting boxes from bottom post...")
+        for i in range(num_signs_bottom):
+            bearing = bearings[i]
+            sign_height = bottom_start_height + (i * sign_increment)
             
-            vertices.append([x, y, 0])  # Bottom ring
-            vertices.append([x, y, self.post_height])  # Top ring
-        
-        # Create side faces
-        for i in range(segments):
-            next_i = (i + 1) % segments
-            bottom1 = i * 2
-            top1 = i * 2 + 1
-            bottom2 = next_i * 2
-            top2 = next_i * 2 + 1
+            print(f"    Box {i+1}: bearing {bearing:.1f}°, height {sign_height:.1f}mm")
             
-            faces.append([bottom1, top1, bottom2])
-            faces.append([top1, top2, bottom2])
+            box_mesh = self._create_box_mesh_at_bearing(bearing, sign_height, 0, 0)
+            try:
+                new_mesh = bottom_post_mesh.difference(box_mesh)
+                if new_mesh is not None and len(new_mesh.faces) > 0:
+                    bottom_post_mesh = new_mesh
+                else:
+                    print(f"      Warning: Boolean operation returned empty mesh")
+            except Exception as e:
+                print(f"      Warning: Boolean operation failed: {e}")
         
-        # Add bottom cap
-        bottom_center_idx = len(vertices)
-        vertices.append([0, 0, 0])
-        for i in range(segments):
-            next_i = (i + 1) % segments
-            faces.append([bottom_center_idx, next_i * 2, i * 2])
+        all_meshes.append(bottom_post_mesh)
         
-        # Add top cap
-        top_center_idx = len(vertices)
-        vertices.append([0, 0, self.post_height])
-        for i in range(segments):
-            next_i = (i + 1) % segments
-            faces.append([top_center_idx, i * 2 + 1, next_i * 2 + 1])
-        
-        all_vertices.extend(vertices)
-        all_faces.extend(faces)
-        
-        # ===== CREATE ONE TEST BOX =====
-        if len(bearings) > 0:
-            bearing = bearings[0]  # Use actual bearing now
-            sign_height = 100.0  # Middle of post
+        # ===== CREATE TOP POST (offset to the side) =====
+        if num_signs_top > 0:
+            print("  Creating top post cylinder...")
+            x_offset = post_separation
             
-            print(f"  Test box at bearing {bearing:.1f}°, height {sign_height:.1f}mm")
-            print(f"  Post radius: {self.post_radius}mm")
-            print(f"  Box should be tangent to outer surface")
-            
-            vertices_offset = len(all_vertices)
-            box_verts, box_faces = self._create_box_at_bearing(
-                bearing, sign_height, 0, 0, vertices_offset
+            top_post_mesh = trimesh.creation.cylinder(
+                radius=self.post_radius,
+                height=top_post_height,
+                sections=64
             )
-            all_vertices.extend(box_verts)
-            all_faces.extend(box_faces)
+            # Translate to sit on Z=0 and offset to the side
+            top_post_mesh.apply_translation([x_offset, 0, top_post_height / 2])
+            
+            # Subtract boxes for top post signs
+            print("  Subtracting boxes from top post...")
+            for i in range(num_signs_top):
+                bearing = bearings[num_signs_bottom + i]
+                sign_bottom = 8.0 + (i * sign_increment)
+                sign_center = sign_bottom + self.flat_height / 2
+                
+                print(f"    Box {i+1}: bearing {bearing:.1f}°, center height {sign_center:.1f}mm")
+                
+                box_mesh = self._create_box_mesh_at_bearing(bearing, sign_center, x_offset, 0)
+                try:
+                    new_mesh = top_post_mesh.difference(box_mesh)
+                    if new_mesh is not None and len(new_mesh.faces) > 0:
+                        top_post_mesh = new_mesh
+                    else:
+                        print(f"      Warning: Boolean operation returned empty mesh")
+                except Exception as e:
+                    print(f"      Warning: Boolean operation failed: {e}")
+            
+            all_meshes.append(top_post_mesh)
         
-        # Convert to numpy and create mesh
-        vertices_array = np.array(all_vertices)
-        faces_array = np.array(all_faces)
+        # Combine all meshes
+        print("  Combining meshes...")
+        combined_mesh = trimesh.util.concatenate(all_meshes)
         
-        post_mesh = mesh.Mesh(np.zeros(faces_array.shape[0], dtype=mesh.Mesh.dtype))
-        for i, face in enumerate(faces_array):
-            for j in range(3):
-                post_mesh.vectors[i][j] = vertices_array[face[j]]
-        
-        post_mesh.save(output_path)
+        # Export to STL
+        combined_mesh.export(output_path)
         print(f"  Saved: {output_path}")
     
     def _create_box_at_bearing(self, bearing: float, sign_height: float, 
@@ -159,7 +200,7 @@ class DirectionSignGenerator:
         box_height = self.flat_height
         # Box depth - this is how thick the box is (in the radial direction)
         # Should be just enough to cut into the post and stick out a bit
-        box_depth = self.flat_depth * 2  # e.g., 2mm cut depth × 2 = 4mm total box depth
+        box_depth = self.flat_depth * 3  # e.g., 3mm cut depth × 3 = 9mm total box depth
         
         # Create box vertices (8 corners)
         # X = width (perpendicular to bearing)
@@ -242,6 +283,45 @@ class DirectionSignGenerator:
         box_faces = [[f[0] + vertex_offset, f[1] + vertex_offset, f[2] + vertex_offset] for f in box_faces]
         
         return box_vertices, box_faces
+    
+    def _create_box_mesh_at_bearing(self, bearing: float, sign_height: float,
+                                    post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:
+        """
+        Create a trimesh box at a specific bearing and height for boolean operations.
+        
+        Args:
+            bearing: Bearing angle in degrees
+            sign_height: Height on the post (center of the flat)
+            post_x_offset: X offset of the post center
+            post_y_offset: Y offset of the post center
+            
+        Returns:
+            trimesh.Trimesh: Box mesh positioned at the bearing
+        """
+        # Box dimensions
+        box_depth = self.flat_depth * 3  # 9mm - extends through post
+        box_width = self.post_radius * 2  # Wide enough to cover post diameter
+        box_height = self.flat_height
+        
+        # Create box centered at origin
+        box = trimesh.creation.box(extents=[box_width, box_depth, box_height])
+        
+        # Position the box at bearing 0 (North, +Y axis)
+        # Box should be tangent to post surface (not cutting through center)
+        distance_from_center = self.post_radius - self.flat_depth + box_depth / 2
+        
+        # Position box along +Y axis at bearing 0
+        box.apply_translation([0, distance_from_center, sign_height])
+        
+        # Rotate around Z-axis by bearing angle
+        angle_rad = math.radians(bearing)
+        rotation_matrix = trimesh.transformations.rotation_matrix(angle_rad, [0, 0, 1])
+        box.apply_transform(rotation_matrix)
+        
+        # Apply post offset
+        box.apply_translation([post_x_offset, post_y_offset, 0])
+        
+        return box
     
     def generate_base(self, output_path: str):
         """
