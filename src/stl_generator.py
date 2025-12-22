@@ -700,7 +700,17 @@ class DirectionSignGenerator:
         
         if needed_width <= available_width:
             # Fits perfectly at max font size!
-            pass
+            # If both texts fit comfortably, reduce sign length to actual needed width
+            # Add padding back to get actual body length needed
+            optimal_body_length = needed_width + left_padding + right_padding
+            # Add some extra margin (10mm) for aesthetics
+            optimal_body_length += 10.0
+            
+            # Only reduce if significantly shorter (save at least 20mm)
+            if optimal_body_length < body_length - 20.0:
+                body_length = optimal_body_length
+                sign_length = body_length + point_length
+                print(f"  Note: Reduced sign length to {sign_length:.1f}mm to fit text")
         else:
             # Strategy 2: Reduce font size proportionally to fit within max length
             scale_factor = available_width / needed_width
