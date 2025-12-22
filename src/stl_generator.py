@@ -90,9 +90,10 @@ class DirectionSignGenerator:
         Generate two post sections with flat indents at specified bearings.
         Creates a two-piece design to fit within 210mm print height.
         Uses boolean subtraction to create flat mounting surfaces.
+        Signs are ordered from top to bottom matching the input bearings list.
         
         Args:
-            bearings: List of bearings (in degrees) where signs will attach
+            bearings: List of bearings (in degrees) where signs will attach, ordered top to bottom
             output_path: Path to save the STL file
         """
         print(f"Generating 2-piece post with {len(bearings)} flat indents...")
@@ -109,7 +110,7 @@ class DirectionSignGenerator:
         sign_increment = self.flat_height + 8.0  # flat_height (28mm) + spacing (8mm)
         top_padding = 8.0  # Spacing above the last sign
         
-        # Determine how many signs fit on bottom post
+        # Determine how many signs fit on bottom post (taller post)
         num_signs_bottom = 0
         current_height = bottom_start_height
         while current_height + self.flat_height <= max_post_height and num_signs_bottom < len(bearings):
@@ -119,7 +120,7 @@ class DirectionSignGenerator:
         # Calculate actual bottom post height (last sign center + half flat height + padding)
         bottom_post_height = bottom_start_height + (num_signs_bottom - 1) * sign_increment + self.flat_height / 2 + top_padding
         
-        # Remaining signs go on top post
+        # Remaining signs go on top post (shorter post)
         num_signs_top = len(bearings) - num_signs_bottom
         
         # Calculate top post height
@@ -133,12 +134,12 @@ class DirectionSignGenerator:
             top_post_height = 0
             top_start_height = 0
         
-        print(f"  Bottom post: {num_signs_bottom} signs, height: {bottom_post_height:.1f}mm")
-        print(f"  Top post: {num_signs_top} signs, height: {top_post_height:.1f}mm")
+        print(f"  First post (taller): {num_signs_bottom} signs, height: {bottom_post_height:.1f}mm")
+        print(f"  Second post (shorter): {num_signs_top} signs, height: {top_post_height:.1f}mm")
         print(f"  Sign increment: {sign_increment:.1f}mm (flat_height {self.flat_height} + spacing 8mm)")
         
-        # ===== CREATE BOTTOM POST =====
-        print("  Creating bottom post cylinder...")
+        # ===== CREATE FIRST POST (TALLER) =====
+        print("  Creating first post cylinder...")
         bottom_post_mesh = trimesh.creation.cylinder(
             radius=self.post_radius,
             height=bottom_post_height,
@@ -147,13 +148,16 @@ class DirectionSignGenerator:
         # Trimesh creates cylinder centered at origin, translate to sit on Z=0
         bottom_post_mesh.apply_translation([0, 0, bottom_post_height / 2])
         
-        # Subtract boxes for bottom post signs
-        print("  Subtracting boxes from bottom post...")
+        # Subtract boxes for first post signs
+        # First post gets the LAST num_signs_bottom locations, in reverse order (bottom to top)
+        print("  Subtracting boxes from first post...")
         for i in range(num_signs_bottom):
-            bearing = bearings[i]
+            # Get bearing from end of list, working backwards
+            bearing_index = len(bearings) - 1 - i
+            bearing = bearings[bearing_index]
             sign_height = bottom_start_height + (i * sign_increment)
             
-            print(f"    Box {i+1}: bearing {bearing:.1f}°, height {sign_height:.1f}mm")
+            print(f"    Box {i+1}: bearing {bearing:.1f}° (location #{bearing_index+1}), height {sign_height:.1f}mm")
             
             box_mesh = self._create_box_mesh_at_bearing(bearing, sign_height, 0, 0)
             try:
@@ -167,9 +171,9 @@ class DirectionSignGenerator:
         
         all_meshes.append(bottom_post_mesh)
         
-        # ===== CREATE TOP POST (offset to the side) =====
+        # ===== CREATE SECOND POST (SHORTER, offset to the side) =====
         if num_signs_top > 0:
-            print("  Creating top post cylinder...")
+            print("  Creating second post cylinder...")
             x_offset = post_separation
             
             top_post_mesh = trimesh.creation.cylinder(
@@ -180,14 +184,17 @@ class DirectionSignGenerator:
             # Translate to sit on Z=0 and offset to the side
             top_post_mesh.apply_translation([x_offset, 0, top_post_height / 2])
             
-            # Subtract boxes for top post signs
-            print("  Subtracting boxes from top post...")
+            # Subtract boxes for second post signs
+            # Second post gets the FIRST num_signs_top locations, in reverse order (bottom to top)
+            print("  Subtracting boxes from second post...")
             for i in range(num_signs_top):
-                bearing = bearings[num_signs_bottom + i]
+                # Get bearing from beginning of list, working backwards
+                bearing_index = num_signs_top - 1 - i
+                bearing = bearings[bearing_index]
                 sign_bottom = 8.0 + (i * sign_increment)
                 sign_center = sign_bottom + self.flat_height / 2
                 
-                print(f"    Box {i+1}: bearing {bearing:.1f}°, center height {sign_center:.1f}mm")
+                print(f"    Box {i+1}: bearing {bearing:.1f}° (location #{bearing_index+1}), center height {sign_center:.1f}mm, post offset X={x_offset:.1f}")
                 
                 box_mesh = self._create_box_mesh_at_bearing(bearing, sign_center, x_offset, 0)
                 try:
@@ -340,16 +347,20 @@ class DirectionSignGenerator:
         # Box should be tangent to post surface (not cutting through center)
         distance_from_center = self.post_radius - self.flat_depth + box_depth / 2
         
-        # Position box along +Y axis at bearing 0
+        # First apply post offset, then position box relative to that post center
+        box.apply_translation([post_x_offset, post_y_offset, 0])
+        
+        # Position box along +Y axis at bearing 0 (relative to post center)
         box.apply_translation([0, distance_from_center, sign_height])
         
-        # Rotate around Z-axis by bearing angle
-        angle_rad = math.radians(bearing)
-        rotation_matrix = trimesh.transformations.rotation_matrix(angle_rad, [0, 0, 1])
+        # Rotate around post center (at post_x_offset, post_y_offset) by bearing angle
+        # IMPORTANT: Negate bearing because cylinder is viewed from bottom looking up
+        angle_rad = math.radians(-bearing)
+        # Create rotation matrix around the post center, not origin
+        rotation_matrix = trimesh.transformations.rotation_matrix(
+            angle_rad, [0, 0, 1], [post_x_offset, post_y_offset, 0]
+        )
         box.apply_transform(rotation_matrix)
-        
-        # Apply post offset
-        box.apply_translation([post_x_offset, post_y_offset, 0])
         
         return box
     
@@ -640,18 +651,23 @@ class DirectionSignGenerator:
         base_mesh.save(output_path)
         print(f"  Saved: {output_path}")
     
-    def generate_sign(self, text: str, distance: str, output_path: str):
+    def generate_sign(self, text: str, distance: str, output_path: str, bearing: float = 0.0):
         """
         Generate a directional sign plate with text.
         Creates a pointed sign (arrow end) with text embossed on it.
         Sign height is flat_height - clearance to fit within the flat indent.
+        If bearing > 180°, sign points left to keep all signs on the same side of post.
         
         Args:
             text: Location name to display
             distance: Distance text to display
             output_path: Path to save the STL file
+            bearing: Bearing angle in degrees (0-360), used to determine sign orientation
         """
-        print(f"Generating sign for '{text}' ({distance})...")
+        # Determine if sign should point left (bearing > 180°)
+        point_left = bearing > 180.0
+        direction_note = " (pointing left)" if point_left else " (pointing right)"
+        print(f"Generating sign for '{text}' ({distance}){direction_note}...")
         
         # Calculate sign dimensions
         sign_height = self.flat_height - (2 * self.sign_clearance)
@@ -763,58 +779,113 @@ class DirectionSignGenerator:
         
         vertices = []
         
-        # Square end (attaches to post) at X=0
-        # Bottom left
-        vertices.append([0, 0, 0])
-        # Bottom right
-        vertices.append([0, sign_height, 0])
-        # Top right
-        vertices.append([0, sign_height, self.sign_thickness])
-        # Top left
-        vertices.append([0, 0, self.sign_thickness])
-        
-        # Body rectangle extends to near the end
-        body_length = sign_length - point_length
-        # Bottom left
-        vertices.append([body_length, 0, 0])
-        # Bottom right
-        vertices.append([body_length, sign_height, 0])
-        # Top right
-        vertices.append([body_length, sign_height, self.sign_thickness])
-        # Top left
-        vertices.append([body_length, 0, self.sign_thickness])
-        
-        # Pointed end - tip at center height
-        tip_y = sign_height / 2  # Point at center
-        # Tip vertex (shared by all point faces)
-        vertices.append([sign_length, tip_y, 0])  # Bottom tip (index 8)
-        vertices.append([sign_length, tip_y, self.sign_thickness])  # Top tip (index 9)
+        if point_left:
+            # Sign points LEFT: pointed end at X=0, square end at X=sign_length
+            # Pointed end - tip at center height
+            tip_y = sign_height / 2
+            vertices.append([0, tip_y, 0])  # Bottom tip (index 0)
+            vertices.append([0, tip_y, self.sign_thickness])  # Top tip (index 1)
+            
+            # Body rectangle extends from point
+            body_start = point_length
+            # Bottom left
+            vertices.append([body_start, 0, 0])
+            # Bottom right
+            vertices.append([body_start, sign_height, 0])
+            # Top right
+            vertices.append([body_start, sign_height, self.sign_thickness])
+            # Top left
+            vertices.append([body_start, 0, self.sign_thickness])
+            
+            # Square end (attaches to post) at X=sign_length
+            # Bottom left
+            vertices.append([sign_length, 0, 0])
+            # Bottom right
+            vertices.append([sign_length, sign_height, 0])
+            # Top right
+            vertices.append([sign_length, sign_height, self.sign_thickness])
+            # Top left
+            vertices.append([sign_length, 0, self.sign_thickness])
+        else:
+            # Sign points RIGHT: square end at X=0, pointed end at X=sign_length
+            # Square end (attaches to post) at X=0
+            # Bottom left
+            vertices.append([0, 0, 0])
+            # Bottom right
+            vertices.append([0, sign_height, 0])
+            # Top right
+            vertices.append([0, sign_height, self.sign_thickness])
+            # Top left
+            vertices.append([0, 0, self.sign_thickness])
+            
+            # Body rectangle extends to near the end
+            body_length = sign_length - point_length
+            # Bottom left
+            vertices.append([body_length, 0, 0])
+            # Bottom right
+            vertices.append([body_length, sign_height, 0])
+            # Top right
+            vertices.append([body_length, sign_height, self.sign_thickness])
+            # Top left
+            vertices.append([body_length, 0, self.sign_thickness])
+            
+            # Pointed end - tip at center height
+            tip_y = sign_height / 2  # Point at center
+            # Tip vertex (shared by all point faces)
+            vertices.append([sign_length, tip_y, 0])  # Bottom tip (index 8)
+            vertices.append([sign_length, tip_y, self.sign_thickness])  # Top tip (index 9)
         
         # Define faces
         faces = []
         
-        # Square end face (vertices 0,1,2,3)
-        faces.extend([[0, 2, 1], [0, 3, 2]])
-        
-        # Body rectangular faces
-        # Bottom face of rectangle
-        faces.extend([[0, 1, 5], [0, 5, 4]])
-        # Top face of rectangle
-        faces.extend([[3, 6, 2], [3, 7, 6]])
-        # Left side of rectangle
-        faces.extend([[0, 4, 7], [0, 7, 3]])
-        # Right side of rectangle
-        faces.extend([[1, 2, 6], [1, 6, 5]])
-        
-        # Triangular point - 4 faces connecting rectangle end to tip
-        # Bottom face: left-bottom (4), right-bottom (5), tip-bottom (8)
-        faces.append([4, 5, 8])
-        # Top face: left-top (7), tip-top (9), right-top (6)
-        faces.append([7, 9, 6])
-        # Left face: left-bottom (4), tip-bottom (8), tip-top (9), left-top (7)
-        faces.extend([[4, 8, 9], [4, 9, 7]])
-        # Right face: right-bottom (5), right-top (6), tip-top (9), tip-bottom (8)
-        faces.extend([[5, 6, 9], [5, 9, 8]])
+        if point_left:
+            # LEFT-POINTING SIGN
+            # Triangular point at left - 4 faces connecting tip to body
+            # Bottom face: tip-bottom (0), right-bottom (3), left-bottom (2)
+            faces.append([0, 3, 2])
+            # Top face: tip-top (1), left-top (5), right-top (4)
+            faces.append([1, 5, 4])
+            # Left face: tip-bottom (0), left-bottom (2), left-top (5), tip-top (1)
+            faces.extend([[0, 2, 5], [0, 5, 1]])
+            # Right face: tip-bottom (0), tip-top (1), right-top (4), right-bottom (3)
+            faces.extend([[0, 1, 4], [0, 4, 3]])
+            
+            # Body rectangular faces
+            # Bottom face
+            faces.extend([[2, 3, 7], [2, 7, 6]])
+            # Top face
+            faces.extend([[5, 4, 8], [5, 8, 9]])
+            # Left side
+            faces.extend([[2, 6, 9], [2, 9, 5]])
+            # Right side
+            faces.extend([[3, 4, 8], [3, 8, 7]])
+            
+            # Square end face (vertices 6,7,8,9)
+            faces.extend([[6, 7, 8], [6, 8, 9]])
+        else:
+            # RIGHT-POINTING SIGN (original)
+            # Square end face (vertices 0,1,2,3)
+            faces.extend([[0, 2, 1], [0, 3, 2]])
+            
+            # Body rectangular faces
+            # Bottom face of rectangle
+            faces.extend([[0, 1, 5], [0, 5, 4]])
+            # Top face of rectangle
+            faces.extend([[3, 6, 2], [3, 7, 6]])
+            # Left side of rectangle
+            faces.extend([[0, 4, 7], [0, 7, 3]])
+            # Right side of rectangle
+            faces.extend([[1, 2, 6], [1, 6, 5]])
+            
+            # Triangular point - 4 faces connecting rectangle end to tip
+            # Bottom face: left-bottom (4), right-bottom (5), tip-bottom (8)
+            faces.append([4, 5, 8])
+            # Top face: left-top (7), tip-top (9), right-top (6)
+            faces.append([7, 9, 6])
+            # Left face: left-bottom (4), tip-bottom (8), tip-top (9), left-top (7)
+            faces.extend([[4, 8, 9], [4, 9, 7]])
+            # Right face: right-bottom (5), right-top (6), tip-top (9), tip-bottom (8)
+            faces.extend([[5, 6, 9], [5, 9, 8]])
         
         # Create base sign mesh using trimesh for easier text operations
         vertices_array = np.array(vertices)
@@ -832,9 +903,13 @@ class DirectionSignGenerator:
                 print(f"  Creating high-quality vector text...")
                 
                 # Create main text mesh
-                # Position: left-justified (near square end), vertically centered
-                # Add extra offset to account for font baseline and any descenders
-                text_x = body_length * 0.05  # 5% from left edge (square end)
+                # Position: near square end (attachment point), vertically centered
+                if point_left:
+                    # Square end is at right, text near right edge
+                    text_x = sign_length * 0.95 - (main_text_width)  # Right-justified, 5% from right edge
+                else:
+                    # Square end is at left, text near left edge
+                    text_x = sign_length * 0.05  # Left-justified, 5% from left edge
                 text_y = (sign_height / 2) - (font_size / 2.8)  # Adjusted for baseline offset
                 text_z = self.sign_thickness
                 
@@ -860,7 +935,12 @@ class DirectionSignGenerator:
                             
                             # Create number text (top line)
                             dist_num_width = len(dist_number) * dist_font_size * 0.6
-                            dist_x = body_length * 0.97 - max(dist_num_width, 2 * dist_font_size * 0.6)
+                            if point_left:
+                                # Pointed end is at left, distance near left edge
+                                dist_x = sign_length * 0.03  # Left side, 3% from edge
+                            else:
+                                # Pointed end is at right, distance near right edge
+                                dist_x = sign_length * 0.97 - max(dist_num_width, 2 * dist_font_size * 0.6)  # Right side, 3% from edge
                             
                             # Position number in upper part of sign (adjusted for baseline)
                             dist_num_y = (sign_height / 2) + (dist_font_size * 0.2)  # Upper half, baseline adjusted

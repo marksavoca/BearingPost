@@ -87,9 +87,13 @@ def main():
     generator.generate_base(base_path)
     
     # Generate the post with flat surfaces at each bearing
-    bearings = [loc.bearing for loc in LOCATIONS]
+    # Adjust bearings > 180° to keep signs on same side of post (front hemisphere)
+    # Bearings > 180° are in the rear, so subtract 180° to mirror them to the front
+    post_bearings = [loc.bearing if loc.bearing <= 180 else loc.bearing - 180 for loc in LOCATIONS]
+    print(f"\nOriginal bearings: {[f'{loc.bearing:.1f}' for loc in LOCATIONS]}")
+    print(f"Adjusted bearings: {[f'{b:.1f}' for b in post_bearings]}")
     post_path = os.path.join(output_dir, "post.stl")
-    generator.generate_post(bearings, post_path)
+    generator.generate_post(post_bearings, post_path)
     
     # Generate individual sign plates for each location
     print("\nGenerating sign plates...")
@@ -97,7 +101,8 @@ def main():
         sign_filename = f"sign_{i+1}_{loc.name.replace(' ', '_').replace(',', '')}.stl"
         sign_path = os.path.join(output_dir, sign_filename)
         distance_str = format_distance(loc.distance_km, units='mi')
-        generator.generate_sign(loc.name, distance_str, sign_path)
+        # Pass bearing to determine sign direction
+        generator.generate_sign(loc.name, distance_str, sign_path, loc.bearing)
     
     print("\n" + "=" * 70)
     print("\nGeneration complete!")
