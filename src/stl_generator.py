@@ -91,6 +91,7 @@ class DirectionSignGenerator:
         Creates a two-piece design to fit within 210mm print height.
         Uses boolean subtraction to create flat mounting surfaces.
         Signs are ordered from top to bottom matching the input bearings list.
+        The first (taller) post includes the base with north arrow.
         
         Args:
             bearings: List of bearings (in degrees) where signs will attach, ordered top to bottom
@@ -106,7 +107,9 @@ class DirectionSignGenerator:
         max_post_height = 200.0  # Maximum height for each post section
         
         # Calculate sign distribution and heights
-        bottom_start_height = 50.0  # Start first sign 50mm from bottom
+        # Account for base height in the first post
+        base_height_offset = self.base_height
+        bottom_start_height = base_height_offset + 40.0  # Start first sign 40mm above base
         sign_increment = self.flat_height + 8.0  # flat_height (28mm) + spacing (8mm)
         top_padding = 8.0  # Spacing above the last sign
         
@@ -134,18 +137,31 @@ class DirectionSignGenerator:
             top_post_height = 0
             top_start_height = 0
         
-        print(f"  First post (taller): {num_signs_bottom} signs, height: {bottom_post_height:.1f}mm")
+        print(f"  First post (taller, with base): {num_signs_bottom} signs, height: {bottom_post_height:.1f}mm (including {base_height_offset:.1f}mm base)")
         print(f"  Second post (shorter): {num_signs_top} signs, height: {top_post_height:.1f}mm")
         print(f"  Sign increment: {sign_increment:.1f}mm (flat_height {self.flat_height} + spacing 8mm)")
         
-        # ===== CREATE FIRST POST (TALLER) =====
-        print("  Creating first post cylinder...")
+        # ===== CREATE FIRST POST (TALLER) WITH BASE =====
+        print("  Creating first post with base...")
+        
+        # Create base
+        base_mesh = trimesh.creation.cylinder(
+            radius=self.base_radius,
+            height=self.base_height,
+            sections=64
+        )
+        base_mesh.apply_translation([0, 0, self.base_height / 2])
+        
+        # Create north arrow on top of base
+        arrow_mesh = self._create_north_arrow()
+        
+        # Create post cylinder
         bottom_post_mesh = trimesh.creation.cylinder(
             radius=self.post_radius,
             height=bottom_post_height,
             sections=64
         )
-        # Trimesh creates cylinder centered at origin, translate to sit on Z=0
+        # Trimesh creates cylinder centered at origin, translate to sit on top of base
         bottom_post_mesh.apply_translation([0, 0, bottom_post_height / 2])
         
         # Subtract boxes for first post signs
@@ -169,7 +185,10 @@ class DirectionSignGenerator:
             except Exception as e:
                 print(f"      Warning: Boolean operation failed: {e}")
         
-        all_meshes.append(bottom_post_mesh)
+        # Combine base, arrow, and post
+        print("  Combining base, arrow, and post...")
+        combined_first_post = trimesh.util.concatenate([base_mesh, arrow_mesh, bottom_post_mesh])
+        all_meshes.append(combined_first_post)
         
         # ===== CREATE SECOND POST (SHORTER, offset to the side) =====
         if num_signs_top > 0:
@@ -320,6 +339,58 @@ class DirectionSignGenerator:
         box_faces = [[f[0] + vertex_offset, f[1] + vertex_offset, f[2] + vertex_offset] for f in box_faces]
         
         return box_vertices, box_faces
+    
+    def _create_north_arrow(self) -> trimesh.Trimesh:
+        """
+        Create a north arrow indicator mesh to sit on top of the base.
+        
+        Returns:
+            trimesh.Trimesh: North arrow mesh
+        """
+        arrow_height = 2.0  # Height of arrow above base
+        arrow_base_y = self.base_radius * 0.6
+        arrow_tip_y = self.base_radius * 0.85
+        
+        # Arrow shaft (rectangle)
+        shaft_width = self.arrow_width * 0.3
+        shaft_depth = self.arrow_length * 0.3
+        shaft_box = trimesh.creation.box(extents=[shaft_width, shaft_depth, arrow_height])
+        shaft_box.apply_translation([0, arrow_base_y - shaft_depth/2, self.base_height + arrow_height/2])
+        
+        # Arrow head (triangular prism)
+        head_height = arrow_tip_y - arrow_base_y
+        vertices = []
+        faces = []
+        
+        # Bottom triangle
+        vertices.extend([
+            [-self.arrow_width/2, arrow_base_y, self.base_height],
+            [self.arrow_width/2, arrow_base_y, self.base_height],
+            [0, arrow_tip_y, self.base_height],
+        ])
+        # Top triangle
+        vertices.extend([
+            [-self.arrow_width/2, arrow_base_y, self.base_height + arrow_height],
+            [self.arrow_width/2, arrow_base_y, self.base_height + arrow_height],
+            [0, arrow_tip_y, self.base_height + arrow_height],
+        ])
+        
+        # Faces
+        faces.extend([
+            # Bottom
+            [0, 2, 1],
+            # Top
+            [3, 4, 5],
+            # Sides
+            [0, 1, 3], [1, 4, 3],
+            [1, 2, 4], [2, 5, 4],
+            [2, 0, 5], [0, 3, 5],
+        ])
+        
+        head_mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+        
+        # Combine shaft and head
+        return trimesh.util.concatenate([shaft_box, head_mesh])
     
     def _create_box_mesh_at_bearing(self, bearing: float, sign_height: float,
                                     post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:

@@ -82,11 +82,8 @@ def main():
     # Initialize the STL generator
     generator = DirectionSignGenerator()
     
-    # Generate the base with north arrow
-    base_path = os.path.join(output_dir, "base.stl")
-    generator.generate_base(base_path)
-    
     # Generate the post with flat surfaces at each bearing
+    # The first (taller) post includes the base with north arrow
     # Adjust bearings > 180° to keep signs on same side of post (front hemisphere)
     # Bearings > 180° are in the rear, so subtract 180° to mirror them to the front
     post_bearings = [loc.bearing if loc.bearing <= 180 else loc.bearing - 180 for loc in LOCATIONS]
@@ -108,8 +105,7 @@ def main():
     print("\nGeneration complete!")
     print(f"Files saved to: {output_dir}")
     print("\nGenerated files:")
-    print(f"  - base.stl (base with north arrow)")
-    print(f"  - post.stl (two-piece post with flat indents)")
+    print(f"  - post.stl (two-piece post with flat indents, first post includes base with north arrow)")
     print(f"  - sign_*.stl ({len(LOCATIONS)} sign plates)")
     print("\nNext steps:")
     print("1. 3D print the components")
