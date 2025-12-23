@@ -190,10 +190,15 @@ class DirectionSignGenerator:
     def _create_id_pins_at_bearing(self, bearing: float, sign_height: float,
                                    post_x_offset: float, post_y_offset: float,
                                    segment_id: int) -> trimesh.Trimesh:
-        """Create up to 3 ID pins (binary) on the flat spot for a segment ID (1-7)."""
-        if segment_id <= 0 or segment_id > 7:
-            raise ValueError(f"segment_id must be 1-7, got {segment_id}")
-        pin_offsets = [-self.id_pin_spacing, 0.0, self.id_pin_spacing]
+        """Create up to 4 ID pins (binary) on the flat spot for a segment ID (1-15)."""
+        if segment_id <= 0 or segment_id > 15:
+            raise ValueError(f"segment_id must be 1-15, got {segment_id}")
+        pin_offsets = [
+            -1.5 * self.id_pin_spacing,
+            -0.5 * self.id_pin_spacing,
+            0.5 * self.id_pin_spacing,
+            1.5 * self.id_pin_spacing,
+        ]
         pin_meshes = []
         for bit_index, x_offset in enumerate(pin_offsets):
             if not (segment_id & (1 << bit_index)):
@@ -219,11 +224,16 @@ class DirectionSignGenerator:
     def _create_id_holes_for_sign(self, sign_length: float, sign_height: float,
                                   point_left: bool, segment_id: int) -> List[trimesh.Trimesh]:
         """Create matching ID pin holes on the sign backside."""
-        if segment_id <= 0 or segment_id > 7:
-            raise ValueError(f"segment_id must be 1-7, got {segment_id}")
+        if segment_id <= 0 or segment_id > 15:
+            raise ValueError(f"segment_id must be 1-15, got {segment_id}")
         hole_radius = self.id_pin_radius + self.id_pin_clearance
         hole_depth = min(self.sign_thickness, self.id_pin_length + self.id_pin_clearance)
-        pin_offsets = [-self.id_pin_spacing, 0.0, self.id_pin_spacing]
+        pin_offsets = [
+            -1.5 * self.id_pin_spacing,
+            -0.5 * self.id_pin_spacing,
+            0.5 * self.id_pin_spacing,
+            1.5 * self.id_pin_spacing,
+        ]
         x_base = sign_length / 2
         holes = []
         for bit_index, x_offset in enumerate(pin_offsets):
@@ -339,12 +349,14 @@ class DirectionSignGenerator:
                 except Exception as e:
                     print(f"      Warning: Flat boolean failed: {e}")
                 
-                if segment_id is not None:
+                if segment_id is not None and segment_id <= 15:
                     id_pin_mesh = self._create_id_pins_at_bearing(
                         adjusted_bearing, segment_sign_center, 0, 0, segment_id
                     )
                     segment_mesh = trimesh.util.concatenate([segment_mesh, id_pin_mesh])
                 else:
+                    if segment_id is not None and segment_id > 15:
+                        print(f"      Note: segment_id {segment_id} exceeds 15; using center pin only")
                     center_pin_mesh = self._create_index_pin_at_bearing(adjusted_bearing, segment_sign_center, 0, 0)
                     segment_mesh = trimesh.util.concatenate([segment_mesh, center_pin_mesh])
             
@@ -1171,12 +1183,14 @@ class DirectionSignGenerator:
         
         # Add indexing hole on the backside (for post pin alignment).
         try:
-            if segment_id is not None:
+            if segment_id is not None and segment_id <= 15:
                 hole_meshes = self._create_id_holes_for_sign(
                     sign_length, sign_height, point_left, segment_id
                 )
                 hole_mesh = trimesh.util.concatenate(hole_meshes)
             else:
+                if segment_id is not None and segment_id > 15:
+                    print(f"  Note: segment_id {segment_id} exceeds 15; using center hole only")
                 hole_mesh = self._create_index_hole_for_sign(sign_length, sign_height, point_left)
             new_mesh = sign_base.difference(hole_mesh)
             if new_mesh is not None and len(new_mesh.faces) > 0:
