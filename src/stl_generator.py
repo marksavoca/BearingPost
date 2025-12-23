@@ -43,7 +43,11 @@ class DirectionSignGenerator:
                  base_text_height: float = 0.5,
                  base_text_gap: float = 2.0,
                  base_text_radius_factor: float = 0.7,
-                 base_text_rotation_deg: float = 90.0):
+                 base_text_rotation_deg: float = 90.0,
+                 index_pin_radius: float = 1.0,
+                 index_pin_length: float = 2.0,
+                 index_pin_clearance: float = 0.2,
+                 index_pin_inset: float = 5.0):
         """
         Initialize the sign generator with dimensions (all in mm).
         
@@ -70,6 +74,10 @@ class DirectionSignGenerator:
             base_text_gap: Gap between latitude and longitude text (mm)
             base_text_radius_factor: Base radius factor for south-side text placement
             base_text_rotation_deg: Z rotation for base text orientation
+            index_pin_radius: Radius of indexing pins on post flats (mm)
+            index_pin_length: Length of indexing pins from flat surface (mm)
+            index_pin_clearance: Radial clearance for sign pin hole (mm)
+            index_pin_inset: Inset from square end for sign pin hole (mm)
         """
         self.post_height = post_height
         self.post_radius = post_radius
@@ -93,6 +101,10 @@ class DirectionSignGenerator:
         self.base_text_gap = base_text_gap
         self.base_text_radius_factor = base_text_radius_factor
         self.base_text_rotation_deg = base_text_rotation_deg
+        self.index_pin_radius = index_pin_radius
+        self.index_pin_length = index_pin_length
+        self.index_pin_clearance = index_pin_clearance
+        self.index_pin_inset = index_pin_inset
 
     def _rotate_mesh_z(self, target_mesh: trimesh.Trimesh, degrees: float,
                        center: Tuple[float, float, float]) -> None:
@@ -101,6 +113,44 @@ class DirectionSignGenerator:
             math.radians(degrees), [0, 0, 1], center
         )
         target_mesh.apply_transform(rotation_matrix)
+
+    def _create_index_pin_at_bearing(self, bearing: float, sign_height: float,
+                                     post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:
+        """Create an indexing pin on the flat spot at a specific bearing."""
+        pin = trimesh.creation.cylinder(
+            radius=self.index_pin_radius,
+            height=self.index_pin_length,
+            sections=24
+        )
+        # Rotate cylinder axis from +Z to +Y for bearing 0.
+        pin.apply_transform(trimesh.transformations.rotation_matrix(
+            math.radians(90), [1, 0, 0]
+        ))
+        # Place pin so it protrudes from the flat surface.
+        radial_center = self.post_radius - self.flat_depth + (self.index_pin_length / 2)
+        pin.apply_translation([0, radial_center, sign_height])
+        # Rotate around post center by bearing (match box subtraction orientation).
+        rotation_matrix = trimesh.transformations.rotation_matrix(
+            math.radians(-bearing), [0, 0, 1], [0, 0, 0]
+        )
+        pin.apply_transform(rotation_matrix)
+        pin.apply_translation([post_x_offset, post_y_offset, 0])
+        return pin
+
+    def _create_index_hole_for_sign(self, sign_length: float, sign_height: float,
+                                    point_left: bool) -> trimesh.Trimesh:
+        """Create a matching indexing hole on the sign backside."""
+        hole_radius = self.index_pin_radius + self.index_pin_clearance
+        hole_depth = min(self.sign_thickness, self.index_pin_length + self.index_pin_clearance)
+        hole = trimesh.creation.cylinder(
+            radius=hole_radius,
+            height=hole_depth,
+            sections=24
+        )
+        x_pos = sign_length / 2
+        y_pos = sign_height / 2
+        hole.apply_translation([x_pos, y_pos, hole_depth / 2])
+        return hole
     
     def generate_post(self, bearings: List[float], output_path: str, home_lat: float = None, home_lon: float = None):
         """
@@ -193,6 +243,7 @@ class DirectionSignGenerator:
         # Subtract boxes for first post signs
         # First post gets the LAST num_signs_bottom locations, in reverse order (bottom to top)
         print("  Subtracting boxes from first post...")
+        bottom_pin_meshes = []
         for i in range(num_signs_bottom):
             # Get bearing from end of list, working backwards
             bearing_index = len(bearings) - 1 - i
@@ -210,6 +261,10 @@ class DirectionSignGenerator:
                     print(f"      Warning: Boolean operation returned empty mesh")
             except Exception as e:
                 print(f"      Warning: Boolean operation failed: {e}")
+            
+            bottom_pin_meshes.append(
+                self._create_index_pin_at_bearing(bearing, sign_height, 0, 0)
+            )
         
         # Combine base, arrow, coordinates text, and post
         print("  Combining base, arrow, coordinates, and post...")
@@ -219,6 +274,8 @@ class DirectionSignGenerator:
         peg_mesh = self._create_alignment_peg(bottom_post_height)
         
         meshes_to_combine = [base_mesh, arrow_mesh, bottom_post_mesh, peg_mesh]
+        if bottom_pin_meshes:
+            meshes_to_combine.extend(bottom_pin_meshes)
         if coords_meshes:
             meshes_to_combine.extend(coords_meshes)
         
@@ -241,6 +298,7 @@ class DirectionSignGenerator:
             # Subtract boxes for second post signs
             # Second post gets the FIRST num_signs_top locations, in reverse order (bottom to top)
             print("  Subtracting boxes from second post...")
+            top_pin_meshes = []
             for i in range(num_signs_top):
                 # Get bearing from beginning of list, working backwards
                 bearing_index = num_signs_top - 1 - i
@@ -259,6 +317,10 @@ class DirectionSignGenerator:
                         print(f"      Warning: Boolean operation returned empty mesh")
                 except Exception as e:
                     print(f"      Warning: Boolean operation failed: {e}")
+                
+                top_pin_meshes.append(
+                    self._create_index_pin_at_bearing(bearing, sign_center, x_offset, 0)
+                )
             
             # Add alignment socket to bottom of second post
             print("  Adding alignment socket to second post...")
@@ -272,6 +334,8 @@ class DirectionSignGenerator:
             except Exception as e:
                 print(f"      Warning: Socket boolean operation failed: {e}")
             
+            if top_pin_meshes:
+                top_post_mesh = trimesh.util.concatenate([top_post_mesh, *top_pin_meshes])
             all_meshes.append(top_post_mesh)
         
         # Combine all meshes
@@ -846,119 +910,54 @@ class DirectionSignGenerator:
         
         vertices = []
         
-        if point_left:
-            # Sign points LEFT: pointed end at X=0, square end at X=sign_length
-            # Pointed end - tip at center height
-            tip_y = sign_height / 2
-            vertices.append([0, tip_y, 0])  # Bottom tip (index 0)
-            vertices.append([0, tip_y, self.sign_thickness])  # Top tip (index 1)
-            
-            # Body rectangle extends from point
-            body_start = point_length
-            # Bottom left
-            vertices.append([body_start, 0, 0])
-            # Bottom right
-            vertices.append([body_start, sign_height, 0])
-            # Top right
-            vertices.append([body_start, sign_height, self.sign_thickness])
-            # Top left
-            vertices.append([body_start, 0, self.sign_thickness])
-            
-            # Square end (attaches to post) at X=sign_length
-            # Bottom left
-            vertices.append([sign_length, 0, 0])
-            # Bottom right
-            vertices.append([sign_length, sign_height, 0])
-            # Top right
-            vertices.append([sign_length, sign_height, self.sign_thickness])
-            # Top left
-            vertices.append([sign_length, 0, self.sign_thickness])
-        else:
-            # Sign points RIGHT: square end at X=0, pointed end at X=sign_length
-            # Square end (attaches to post) at X=0
-            # Bottom left
-            vertices.append([0, 0, 0])
-            # Bottom right
-            vertices.append([0, sign_height, 0])
-            # Top right
-            vertices.append([0, sign_height, self.sign_thickness])
-            # Top left
-            vertices.append([0, 0, self.sign_thickness])
-            
-            # Body rectangle extends to near the end
-            body_length = sign_length - point_length
-            # Bottom left
-            vertices.append([body_length, 0, 0])
-            # Bottom right
-            vertices.append([body_length, sign_height, 0])
-            # Top right
-            vertices.append([body_length, sign_height, self.sign_thickness])
-            # Top left
-            vertices.append([body_length, 0, self.sign_thickness])
-            
-            # Pointed end - tip at center height
-            tip_y = sign_height / 2  # Point at center
-            # Tip vertex (shared by all point faces)
-            vertices.append([sign_length, tip_y, 0])  # Bottom tip (index 8)
-            vertices.append([sign_length, tip_y, self.sign_thickness])  # Top tip (index 9)
+        # Build right-pointing geometry (square end at X=0, pointed end at X=sign_length)
+        vertices.append([0, 0, 0])
+        vertices.append([0, sign_height, 0])
+        vertices.append([0, sign_height, self.sign_thickness])
+        vertices.append([0, 0, self.sign_thickness])
         
-        # Define faces
+        body_length = sign_length - point_length
+        vertices.append([body_length, 0, 0])
+        vertices.append([body_length, sign_height, 0])
+        vertices.append([body_length, sign_height, self.sign_thickness])
+        vertices.append([body_length, 0, self.sign_thickness])
+        
+        tip_y = sign_height / 2
+        vertices.append([sign_length, tip_y, 0])
+        vertices.append([sign_length, tip_y, self.sign_thickness])
+        
+        # Define faces for right-pointing geometry
         faces = []
+        faces.extend([[0, 2, 1], [0, 3, 2]])
+        faces.extend([[0, 1, 5], [0, 5, 4]])
+        faces.extend([[3, 6, 2], [3, 7, 6]])
+        faces.extend([[0, 4, 7], [0, 7, 3]])
+        faces.extend([[1, 2, 6], [1, 6, 5]])
+        faces.append([4, 5, 8])
+        faces.append([7, 9, 6])
+        faces.extend([[4, 8, 9], [4, 9, 7]])
+        faces.extend([[5, 6, 9], [5, 9, 8]])
         
         if point_left:
-            # LEFT-POINTING SIGN
-            # Triangular point at left - 4 faces connecting tip to body
-            # Bottom face: tip-bottom (0), right-bottom (3), left-bottom (2)
-            faces.append([0, 3, 2])
-            # Top face: tip-top (1), left-top (5), right-top (4)
-            faces.append([1, 5, 4])
-            # Left face: tip-bottom (0), left-bottom (2), left-top (5), tip-top (1)
-            faces.extend([[0, 2, 5], [0, 5, 1]])
-            # Right face: tip-bottom (0), tip-top (1), right-top (4), right-bottom (3)
-            faces.extend([[0, 1, 4], [0, 4, 3]])
-            
-            # Body rectangular faces
-            # Bottom face
-            faces.extend([[2, 3, 7], [2, 7, 6]])
-            # Top face
-            faces.extend([[5, 4, 8], [5, 8, 9]])
-            # Left side
-            faces.extend([[2, 6, 9], [2, 9, 5]])
-            # Right side
-            faces.extend([[3, 4, 8], [3, 8, 7]])
-            
-            # Square end face (vertices 6,7,8,9)
-            faces.extend([[6, 7, 8], [6, 8, 9]])
-        else:
-            # RIGHT-POINTING SIGN (original)
-            # Square end face (vertices 0,1,2,3)
-            faces.extend([[0, 2, 1], [0, 3, 2]])
-            
-            # Body rectangular faces
-            # Bottom face of rectangle
-            faces.extend([[0, 1, 5], [0, 5, 4]])
-            # Top face of rectangle
-            faces.extend([[3, 6, 2], [3, 7, 6]])
-            # Left side of rectangle
-            faces.extend([[0, 4, 7], [0, 7, 3]])
-            # Right side of rectangle
-            faces.extend([[1, 2, 6], [1, 6, 5]])
-            
-            # Triangular point - 4 faces connecting rectangle end to tip
-            # Bottom face: left-bottom (4), right-bottom (5), tip-bottom (8)
-            faces.append([4, 5, 8])
-            # Top face: left-top (7), tip-top (9), right-top (6)
-            faces.append([7, 9, 6])
-            # Left face: left-bottom (4), tip-bottom (8), tip-top (9), left-top (7)
-            faces.extend([[4, 8, 9], [4, 9, 7]])
-            # Right face: right-bottom (5), right-top (6), tip-top (9), tip-bottom (8)
-            faces.extend([[5, 6, 9], [5, 9, 8]])
+            vertices = [[sign_length - v[0], v[1], v[2]] for v in vertices]
+            faces = [[f[2], f[1], f[0]] for f in faces]
         
         # Create base sign mesh using trimesh for easier text operations
         vertices_array = np.array(vertices)
         faces_array = np.array(faces)
         
         sign_base = trimesh.Trimesh(vertices=vertices_array, faces=faces_array)
+        
+        # Add indexing hole on the backside (for post pin alignment).
+        try:
+            hole_mesh = self._create_index_hole_for_sign(sign_length, sign_height, point_left)
+            new_mesh = sign_base.difference(hole_mesh)
+            if new_mesh is not None and len(new_mesh.faces) > 0:
+                sign_base = new_mesh
+            else:
+                print(f"  Warning: Index hole boolean returned empty mesh")
+        except Exception as e:
+            print(f"  Warning: Index hole boolean operation failed: {e}")
         
         # Add embossed text using vector-based rendering
         if not FREETYPE_AVAILABLE:
