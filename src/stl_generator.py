@@ -403,8 +403,8 @@ class DirectionSignGenerator:
             math.radians(90), [0, 0, 1], [0, 0, z_center]
         ))
         
-        # Position on the north side of the base (+Y direction),
-        # nudged toward the west (-X) per the top-view orientation.
+        # Position on the base top, nudged toward west (-X); Y offset is kept
+        # at the midline to preserve current visual placement.
         base_y =  0
         max_y = self.base_radius * 0.85
         if base_y + letter_height > max_y:
@@ -444,7 +444,6 @@ class DirectionSignGenerator:
             text_height = 0.5  # 0.5mm emboss height
             base_z = self.base_height + text_height
             # Both texts on south side (-Y), centered horizontally
-            x_pos = 0  # Centered on X axis
             y_pos = -self.base_radius * 0.7  # South side (negative Y)
             gap = 2.0  # mm between lat and long
             lat_width = len(lat_text) * font_size * 0.6
