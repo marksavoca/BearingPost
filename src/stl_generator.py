@@ -187,7 +187,12 @@ class DirectionSignGenerator:
         
         # Combine base, arrow, and post
         print("  Combining base, arrow, and post...")
-        combined_first_post = trimesh.util.concatenate([base_mesh, arrow_mesh, bottom_post_mesh])
+        
+        # Add alignment peg on top of first post
+        print("  Adding alignment peg to first post...")
+        peg_mesh = self._create_alignment_peg(bottom_post_height)
+        
+        combined_first_post = trimesh.util.concatenate([base_mesh, arrow_mesh, bottom_post_mesh, peg_mesh])
         all_meshes.append(combined_first_post)
         
         # ===== CREATE SECOND POST (SHORTER, offset to the side) =====
@@ -224,6 +229,18 @@ class DirectionSignGenerator:
                         print(f"      Warning: Boolean operation returned empty mesh")
                 except Exception as e:
                     print(f"      Warning: Boolean operation failed: {e}")
+            
+            # Add alignment socket to bottom of second post
+            print("  Adding alignment socket to second post...")
+            socket_mesh = self._create_alignment_socket(x_offset, 0)
+            try:
+                new_mesh = top_post_mesh.difference(socket_mesh)
+                if new_mesh is not None and len(new_mesh.faces) > 0:
+                    top_post_mesh = new_mesh
+                else:
+                    print(f"      Warning: Socket boolean operation returned empty mesh")
+            except Exception as e:
+                print(f"      Warning: Socket boolean operation failed: {e}")
             
             all_meshes.append(top_post_mesh)
         
@@ -343,36 +360,36 @@ class DirectionSignGenerator:
     def _create_north_arrow(self) -> trimesh.Trimesh:
         """
         Create a north arrow indicator mesh to sit on top of the base.
+        Arrow points in the +X direction to indicate north (bearing 0°).
         
         Returns:
             trimesh.Trimesh: North arrow mesh
         """
         arrow_height = 2.0  # Height of arrow above base
-        arrow_base_y = self.base_radius * 0.6
-        arrow_tip_y = self.base_radius * 0.85
+        arrow_base_x = self.base_radius * 0.6
+        arrow_tip_x = self.base_radius * 0.85
         
-        # Arrow shaft (rectangle)
+        # Arrow shaft (rectangle) - pointing in +X direction (north)
         shaft_width = self.arrow_width * 0.3
         shaft_depth = self.arrow_length * 0.3
-        shaft_box = trimesh.creation.box(extents=[shaft_width, shaft_depth, arrow_height])
-        shaft_box.apply_translation([0, arrow_base_y - shaft_depth/2, self.base_height + arrow_height/2])
+        shaft_box = trimesh.creation.box(extents=[shaft_depth, shaft_width, arrow_height])
+        shaft_box.apply_translation([arrow_base_x - shaft_depth/2, 0, self.base_height + arrow_height/2])
         
-        # Arrow head (triangular prism)
-        head_height = arrow_tip_y - arrow_base_y
+        # Arrow head (triangular prism) - pointing in +X direction (north)
         vertices = []
         faces = []
         
         # Bottom triangle
         vertices.extend([
-            [-self.arrow_width/2, arrow_base_y, self.base_height],
-            [self.arrow_width/2, arrow_base_y, self.base_height],
-            [0, arrow_tip_y, self.base_height],
+            [arrow_base_x, -self.arrow_width/2, self.base_height],
+            [arrow_base_x, self.arrow_width/2, self.base_height],
+            [arrow_tip_x, 0, self.base_height],
         ])
         # Top triangle
         vertices.extend([
-            [-self.arrow_width/2, arrow_base_y, self.base_height + arrow_height],
-            [self.arrow_width/2, arrow_base_y, self.base_height + arrow_height],
-            [0, arrow_tip_y, self.base_height + arrow_height],
+            [arrow_base_x, -self.arrow_width/2, self.base_height + arrow_height],
+            [arrow_base_x, self.arrow_width/2, self.base_height + arrow_height],
+            [arrow_tip_x, 0, self.base_height + arrow_height],
         ])
         
         # Faces
@@ -391,6 +408,81 @@ class DirectionSignGenerator:
         
         # Combine shaft and head
         return trimesh.util.concatenate([shaft_box, head_mesh])
+    
+    def _create_alignment_peg(self, post_height: float) -> trimesh.Trimesh:
+        """
+        Create an alignment peg for the top of the first post.
+        Includes a keying feature to ensure correct rotational alignment.
+        
+        Args:
+            post_height: Height of the post (peg sits on top)
+            
+        Returns:
+            trimesh.Trimesh: Alignment peg mesh
+        """
+        # Peg dimensions
+        peg_radius = 6.0  # 6mm radius (80% of 15mm post radius)
+        peg_height = 8.0  # 8mm tall
+        key_width = 3.0   # 3mm wide alignment key
+        key_depth = 1.5   # 1.5mm deep (extends from peg surface)
+        
+        # Create main cylindrical peg
+        peg = trimesh.creation.cylinder(
+            radius=peg_radius,
+            height=peg_height,
+            sections=32
+        )
+        peg.apply_translation([0, 0, post_height + peg_height / 2])
+        
+        # Create alignment key (rectangular protrusion at 0° / north)
+        key_box = trimesh.creation.box(
+            extents=[key_width, key_depth * 2, peg_height]
+        )
+        # Position key at north side of peg (0° bearing = +Y direction)
+        key_box.apply_translation([0, peg_radius + key_depth, post_height + peg_height / 2])
+        
+        # Combine peg and key
+        return trimesh.util.concatenate([peg, key_box])
+    
+    def _create_alignment_socket(self, post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:
+        """
+        Create an alignment socket for the bottom of the second post.
+        Includes a keying slot to match the peg's alignment key.
+        
+        Args:
+            post_x_offset: X offset of the post center
+            post_y_offset: Y offset of the post center
+            
+        Returns:
+            trimesh.Trimesh: Alignment socket mesh (for boolean subtraction)
+        """
+        # Socket dimensions (slightly larger than peg for clearance)
+        socket_radius = 6.3   # 0.3mm radial clearance
+        socket_depth = 8.5    # 0.5mm deeper than peg
+        key_width = 3.3       # 0.3mm clearance
+        key_depth = 1.8       # 0.3mm clearance
+        
+        # Create main cylindrical socket
+        socket = trimesh.creation.cylinder(
+            radius=socket_radius,
+            height=socket_depth,
+            sections=32
+        )
+        socket.apply_translation([post_x_offset, post_y_offset, socket_depth / 2])
+        
+        # Create alignment key slot (rectangular cutout at 0° / north)
+        key_slot = trimesh.creation.box(
+            extents=[key_width, key_depth * 2, socket_depth]
+        )
+        # Position slot at north side of socket (0° bearing = +Y direction)
+        key_slot.apply_translation([
+            post_x_offset,
+            post_y_offset + socket_radius + key_depth,
+            socket_depth / 2
+        ])
+        
+        # Combine socket and key slot
+        return trimesh.util.concatenate([socket, key_slot])
     
     def _create_box_mesh_at_bearing(self, bearing: float, sign_height: float,
                                     post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:
