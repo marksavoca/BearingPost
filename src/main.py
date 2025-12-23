@@ -123,6 +123,8 @@ def main():
     # Initialize the STL generator
     generator = DirectionSignGenerator()
     
+    config_basename = os.path.splitext(os.path.basename(args.config))[0]
+
     # Generate the post with flat surfaces at each bearing
     # The first (taller) post includes the base with north arrow
     # Adjust bearings > 180° to keep signs on same side of post (front hemisphere)
@@ -130,13 +132,13 @@ def main():
     post_bearings = [loc.bearing if loc.bearing <= 180 else loc.bearing - 180 for loc in LOCATIONS]
     print(f"\nOriginal bearings: {[f'{loc.bearing:.1f}' for loc in LOCATIONS]}")
     print(f"Adjusted bearings: {[f'{b:.1f}' for b in post_bearings]}")
-    post_path = os.path.join(output_dir, "post.stl")
+    post_path = os.path.join(output_dir, f"{config_basename}_post.stl")
     generator.generate_post(post_bearings, post_path, HOME.latitude, HOME.longitude)
     
     # Generate individual sign plates for each location
     print("\nGenerating sign plates...")
     for i, loc in enumerate(LOCATIONS):
-        sign_filename = f"sign_{i+1}_{loc.name.replace(' ', '_').replace(',', '')}.stl"
+        sign_filename = f"{config_basename}_sign_{i+1}_{loc.name.replace(' ', '_').replace(',', '')}.stl"
         sign_path = os.path.join(output_dir, sign_filename)
         distance_str = format_distance(loc.distance_km, units=units)
         # Pass bearing to determine sign direction
