@@ -333,6 +333,16 @@ class DirectionSignGenerator:
             except Exception as e:
                 print(f"      Warning: Socket boolean failed: {e}")
             
+            magnet_cutter = self._create_socket_magnet_cutter(0, 0)
+            try:
+                new_mesh = segment_mesh.difference(magnet_cutter)
+                if new_mesh is not None and len(new_mesh.faces) > 0:
+                    segment_mesh = new_mesh
+                else:
+                    print(f"      Warning: Magnet boolean returned empty mesh")
+            except Exception as e:
+                print(f"      Warning: Magnet boolean failed: {e}")
+            
             peg_mesh = self._create_alignment_peg(segment_height)
             segment_mesh = trimesh.util.concatenate([segment_mesh, peg_mesh])
             
@@ -358,6 +368,16 @@ class DirectionSignGenerator:
                 print(f"    Warning: Topper socket boolean returned empty mesh")
         except Exception as e:
             print(f"    Warning: Topper socket boolean failed: {e}")
+        
+        magnet_cutter = self._create_socket_magnet_cutter(0, 0)
+        try:
+            new_mesh = topper_mesh.difference(magnet_cutter)
+            if new_mesh is not None and len(new_mesh.faces) > 0:
+                topper_mesh = new_mesh
+            else:
+                print(f"    Warning: Topper magnet boolean returned empty mesh")
+        except Exception as e:
+            print(f"    Warning: Topper magnet boolean failed: {e}")
         
         topper_path = f"{output_base}_topper.stl"
         topper_mesh.export(topper_path)
@@ -655,9 +675,13 @@ class DirectionSignGenerator:
             socket_depth / 2
         ])
         
-        socket_mesh = trimesh.util.concatenate([socket, key_slot])
-        
-        # Add magnet pocket centered on bottom of socket (as cutter volume)
+        return trimesh.util.concatenate([socket, key_slot])
+
+    def _create_socket_magnet_cutter(self, post_x_offset: float,
+                                     post_y_offset: float) -> trimesh.Trimesh:
+        """Create a magnet cutter that recesses upward from the socket ceiling."""
+        join_max_height = max(0.0, (self.sign_vertical_spacing / 2) - self.sign_clearance)
+        socket_depth = min(8.5, join_max_height)
         magnet_radius = (self.magnet_diameter / 2) + self.magnet_clearance
         magnet_depth = min(self.magnet_thickness + self.magnet_clearance, socket_depth)
         magnet = trimesh.creation.cylinder(
@@ -668,10 +692,9 @@ class DirectionSignGenerator:
         magnet.apply_translation([
             post_x_offset,
             post_y_offset,
-            magnet_depth / 2
+            socket_depth + (magnet_depth / 2)
         ])
-        
-        return trimesh.util.concatenate([socket_mesh, magnet])
+        return magnet
     
     def _create_box_mesh_at_bearing(self, bearing: float, sign_height: float,
                                     post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:
