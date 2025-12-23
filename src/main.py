@@ -83,6 +83,7 @@ def main():
     parser = argparse.ArgumentParser(description="Direction Sign Generator")
     parser.add_argument("--config", required=True, help="Path to config JSON file")
     parser.add_argument("--spacers", type=int, default=0, help="Number of spacer segments to add")
+    parser.add_argument("--coords", action="store_true", help="Emboss lat/long on base")
     args = parser.parse_args()
     HOME, LOCATIONS, units, user_agent = load_config(args.config)
 
@@ -138,7 +139,10 @@ def main():
     adjusted_bearings = [f"{s['bearing']:.1f}" for s in post_segments if "bearing" in s]
     print(f"Adjusted bearings: {adjusted_bearings}")
     post_path = os.path.join(output_dir, f"{config_basename}_post.stl")
-    generator.generate_post(post_segments, post_path, HOME.latitude, HOME.longitude)
+    if args.coords:
+        generator.generate_post(post_segments, post_path, HOME.latitude, HOME.longitude)
+    else:
+        generator.generate_post(post_segments, post_path)
     
     # Generate individual sign plates for each location
     print("\nGenerating sign plates...")
