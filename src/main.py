@@ -128,7 +128,7 @@ def main():
 
     # Generate segmented posts with fixed home flat on south (180°)
     post_segments = []
-    post_segments.append({"bearing": 180.0, "segment_id": 1})
+    post_segments.append({"bearing": 90.0, "segment_id": 1})
     for i, loc in enumerate(LOCATIONS):
         bearing = loc.bearing if loc.bearing <= 180 else loc.bearing - 180
         post_segments.append({"bearing": bearing, "segment_id": i + 2})
@@ -146,7 +146,7 @@ def main():
         output_dir,
         f"{config_basename}_sign_1_{HOME.name.replace(' ', '_').replace(',', '')}.stl"
     )
-    generator.generate_sign(HOME.name, "", home_sign_path, 180.0, segment_id=1, arrowed=False)
+    generator.generate_sign(HOME.name, "", home_sign_path, 90.0, segment_id=1, arrowed=False)
     for i, loc in enumerate(LOCATIONS):
         sign_filename = f"{config_basename}_sign_{i+2}_{loc.name.replace(' ', '_').replace(',', '')}.stl"
         sign_path = os.path.join(output_dir, sign_filename)
