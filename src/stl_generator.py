@@ -29,7 +29,7 @@ class DirectionSignGenerator:
     
     def __init__(self, 
                  post_height: float = 200.0,
-                 post_radius: float = 15.0,
+                 post_radius: float = 8.0,
                  base_radius: float = 40.0,
                  base_height: float = 10.0,
                  sign_width: float = 100.0,
@@ -420,11 +420,11 @@ class DirectionSignGenerator:
         Returns:
             trimesh.Trimesh: Alignment peg mesh
         """
-        # Peg dimensions
-        peg_radius = 6.0  # 6mm radius (80% of 15mm post radius)
+        # Peg dimensions - scale with post radius, ensure key stays within post diameter
+        peg_radius = self.post_radius * 0.5  # 50% of post radius (4mm for 8mm post)
         peg_height = 8.0  # 8mm tall
-        key_width = 3.0   # 3mm wide alignment key
-        key_depth = 1.5   # 1.5mm deep (extends from peg surface)
+        key_width = self.post_radius * 0.3  # 30% of post radius (2.4mm for 8mm post)
+        key_depth = self.post_radius * 0.15  # 15% of post radius (1.2mm for 8mm post)
         
         # Create main cylindrical peg
         peg = trimesh.creation.cylinder(
@@ -438,8 +438,8 @@ class DirectionSignGenerator:
         key_box = trimesh.creation.box(
             extents=[key_width, key_depth * 2, peg_height]
         )
-        # Position key at north side of peg (0° bearing = +Y direction)
-        key_box.apply_translation([0, peg_radius + key_depth, post_height + peg_height / 2])
+        # Position key at north side of peg (0° bearing = +X direction)
+        key_box.apply_translation([peg_radius + key_depth, 0, post_height + peg_height / 2])
         
         # Combine peg and key
         return trimesh.util.concatenate([peg, key_box])
@@ -456,11 +456,12 @@ class DirectionSignGenerator:
         Returns:
             trimesh.Trimesh: Alignment socket mesh (for boolean subtraction)
         """
-        # Socket dimensions (slightly larger than peg for clearance)
-        socket_radius = 6.3   # 0.3mm radial clearance
+        # Socket dimensions (slightly larger than peg for clearance) - scale with post radius
+        peg_radius = self.post_radius * 0.5
+        socket_radius = peg_radius + 0.3   # 0.3mm radial clearance
         socket_depth = 8.5    # 0.5mm deeper than peg
-        key_width = 3.3       # 0.3mm clearance
-        key_depth = 1.8       # 0.3mm clearance
+        key_width = self.post_radius * 0.3 + 0.3       # 0.3mm clearance
+        key_depth = self.post_radius * 0.15 + 0.3       # 0.3mm clearance
         
         # Create main cylindrical socket
         socket = trimesh.creation.cylinder(
@@ -474,10 +475,10 @@ class DirectionSignGenerator:
         key_slot = trimesh.creation.box(
             extents=[key_width, key_depth * 2, socket_depth]
         )
-        # Position slot at north side of socket (0° bearing = +Y direction)
+        # Position slot at north side of socket (0° bearing = +X direction)
         key_slot.apply_translation([
-            post_x_offset,
-            post_y_offset + socket_radius + key_depth,
+            post_x_offset + peg_radius + key_depth,
+            post_y_offset,
             socket_depth / 2
         ])
         
