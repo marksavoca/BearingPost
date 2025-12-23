@@ -7,7 +7,7 @@ import argparse
 import json
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
-from geo_utils import haversine_distance, calculate_bearing, format_distance
+from geo_utils import haversine_distance, calculate_bearing, format_distance, geocode_place
 from stl_generator import DirectionSignGenerator
 import os
 
@@ -26,15 +26,25 @@ class Location:
     text_color: str = "white"  # Color for the sign text
 
 
-def load_config(path: str) -> Tuple[Location, List[Location], str]:
+def load_config(path: str) -> Tuple[Location, List[Location], str, str]:
     with open(path, "r", encoding="utf-8") as handle:
         config = json.load(handle)
     units = config.get("units", "mi")
+    user_agent = config.get("user_agent", "direction_sign/1.0")
     home_cfg = config["home"]
+    config_dirty = False
+    if "latitude" not in home_cfg or "longitude" not in home_cfg:
+        home_query = home_cfg.get("location") or home_cfg["name"]
+        home_lat, home_lon = geocode_place(home_query, user_agent=user_agent)
+        home_cfg["latitude"] = home_lat
+        home_cfg["longitude"] = home_lon
+        config_dirty = True
+    else:
+        home_lat, home_lon = home_cfg["latitude"], home_cfg["longitude"]
     home = Location(
         name=home_cfg["name"],
-        latitude=home_cfg["latitude"],
-        longitude=home_cfg["longitude"],
+        latitude=home_lat,
+        longitude=home_lon,
         location=home_cfg.get("location", home_cfg["name"]),
         font=home_cfg.get("font", "Arial"),
         sign_color=home_cfg.get("sign_color", "blue"),
@@ -42,25 +52,38 @@ def load_config(path: str) -> Tuple[Location, List[Location], str]:
     )
     locations = []
     for entry in config.get("locations", []):
+        if "latitude" not in entry or "longitude" not in entry:
+            query = entry.get("location") or entry["name"]
+            lat, lon = geocode_place(query, user_agent=user_agent)
+            entry["latitude"] = lat
+            entry["longitude"] = lon
+            config_dirty = True
+        else:
+            lat, lon = entry["latitude"], entry["longitude"]
         locations.append(
             Location(
                 name=entry["name"],
-                latitude=entry["latitude"],
-                longitude=entry["longitude"],
+                latitude=lat,
+                longitude=lon,
                 location=entry.get("location", entry["name"]),
                 font=entry.get("font", "Arial"),
                 sign_color=entry.get("sign_color", "blue"),
                 text_color=entry.get("text_color", "white"),
             )
         )
-    return home, locations, units
+    if config_dirty:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(config, handle, indent=2)
+            handle.write("\n")
+        print(f"Updated config with geocoded lat/long: {path}")
+    return home, locations, units, user_agent
 
 def main():
     """Main entry point for generating direction sign STLs."""
     parser = argparse.ArgumentParser(description="Direction Sign Generator")
     parser.add_argument("--config", required=True, help="Path to config JSON file")
     args = parser.parse_args()
-    HOME, LOCATIONS, units = load_config(args.config)
+    HOME, LOCATIONS, units, user_agent = load_config(args.config)
 
     print("Direction Sign Generator")
     print("=" * 70)

@@ -1,4 +1,5 @@
 {
+  "user_agent": "direction_sign/1.0",
   "units": "mi",
   "home": {
     "name": "Mullica Hill",
@@ -13,11 +14,11 @@
     {
       "name": "Albany",
       "location": "Albany, NY",
-      "latitude": 42.697749760384546,
-      "longitude": -73.96640153872819,
       "font": "Arial",
       "sign_color": "blue",
-      "text_color": "white"
+      "text_color": "white",
+      "latitude": 42.6511674,
+      "longitude": -73.754968
     },
     {
       "name": "Wharton",
