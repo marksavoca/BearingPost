@@ -11,6 +11,10 @@ ENV/
 # Output files
 output/*.stl
 
+# Configs (track only example.json)
+configs/*
+!configs/example.json
+
 # IDE
 .vscode/
 .idea/
