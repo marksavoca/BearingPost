@@ -1,0 +1,61 @@
+{
+  "units": "mi",
+  "home": {
+    "name": "711 Green Lane",
+    "latitude": 39.73059345761767,
+    "longitude": -75.16805997015658,
+    "font": "Arial",
+    "color": "blue"
+  },
+  "locations": [
+    {
+      "name": "Albany",
+      "latitude": 42.697749760384546,
+      "longitude": -73.96640153872819,
+      "font": "Arial",
+      "color": "blue"
+    },
+    {
+      "name": "Wharton",
+      "latitude": 40.89469275367825,
+      "longitude": -74.57707989642749,
+      "font": "Arial",
+      "color": "green"
+    },
+    {
+      "name": "Stone Harbor",
+      "latitude": 39.05421572551508,
+      "longitude": -74.75888740116326,
+      "font": "Arial",
+      "color": "teal"
+    },
+    {
+      "name": "Rome",
+      "latitude": 41.9028,
+      "longitude": 12.4964,
+      "font": "Arial",
+      "color": "red"
+    },
+    {
+      "name": "Boston",
+      "latitude": 42.33813538280124,
+      "longitude": -71.09011637177542,
+      "font": "Arial",
+      "color": "maroon"
+    },
+    {
+      "name": "Philadelphia",
+      "latitude": 39.93617180632561,
+      "longitude": -75.16416042623342,
+      "font": "Arial",
+      "color": "orange"
+    },
+    {
+      "name": "Los Angeles",
+      "latitude": 34.06965322948626,
+      "longitude": -118.44078368287897,
+      "font": "Arial",
+      "color": "purple"
+    }
+  ]
+}

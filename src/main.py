@@ -3,7 +3,8 @@ Direction Sign Generator
 Creates STL files for 3D-printable directional signs with geographic accuracy.
 """
 
-import pandas as pd
+import argparse
+import json
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
 from geo_utils import haversine_distance, calculate_bearing, format_distance
@@ -23,35 +24,38 @@ class Location:
     color: str = "blue"  # Color for the sign
 
 
-# Home location (reference point where the sign will sit)
-HOME = Location(
-    name="711 Green Lane",
-    latitude=39.73059345761767,
-    longitude=-75.16805997015658
-)
-
-#HOME = Location(
-#    name="3760 Midvale",
-#    latitude=34.017087145650365,
-#    longitude=-118.41112430469079
-#)
-
-# Destinations to point to
-LOCATIONS = [
-    Location("Albany", 42.697749760384546, -73.96640153872819, font="Arial", color="blue"),
-    Location("Wharton", 40.89469275367825, -74.57707989642749, font="Arial", color="green"),
-    Location("Stone Harbor", 39.05421572551508, -74.75888740116326, font="Arial", color="teal"),
-    Location("Rome", 41.9028, 12.4964, font="Arial", color="red"),
-    Location("Boston", 42.33813538280124, -71.09011637177542, font="Arial", color="maroon"),
-    Location("Philadelphia", 39.93617180632561, -75.16416042623342, font="Arial", color="orange"),
-    Location("Los Angeles", 34.06965322948626, -118.44078368287897, font="Arial", color="purple"),
-]
-
- # Location("Los Angeles", 34.06965322948626, -118.44078368287897, font="Arial", color="purple"),
- # Location("Mullica Hill", 39.73059345761767, -75.16805997015658, font="Arial", color="purple"),
+def load_config(path: str) -> Tuple[Location, List[Location], str]:
+    with open(path, "r", encoding="utf-8") as handle:
+        config = json.load(handle)
+    units = config.get("units", "mi")
+    home_cfg = config["home"]
+    home = Location(
+        name=home_cfg["name"],
+        latitude=home_cfg["latitude"],
+        longitude=home_cfg["longitude"],
+        font=home_cfg.get("font", "Arial"),
+        color=home_cfg.get("color", "blue"),
+    )
+    locations = []
+    for entry in config.get("locations", []):
+        locations.append(
+            Location(
+                name=entry["name"],
+                latitude=entry["latitude"],
+                longitude=entry["longitude"],
+                font=entry.get("font", "Arial"),
+                color=entry.get("color", "blue"),
+            )
+        )
+    return home, locations, units
 
 def main():
     """Main entry point for generating direction sign STLs."""
+    parser = argparse.ArgumentParser(description="Direction Sign Generator")
+    parser.add_argument("--config", required=True, help="Path to config JSON file")
+    args = parser.parse_args()
+    HOME, LOCATIONS, units = load_config(args.config)
+
     print("Direction Sign Generator")
     print("=" * 70)
     print(f"Home Location: {HOME.name}")
@@ -75,7 +79,7 @@ def main():
     print("=" * 70)
     
     for loc in LOCATIONS:
-        distance_str = format_distance(loc.distance_km, units='mi')
+        distance_str = format_distance(loc.distance_km, units=units)
         bearing_str = f"{loc.bearing:.1f}°"
         print(f"{loc.name:<35} {distance_str:<20} {bearing_str:<15} {loc.font:<10} {loc.color:<10}")
     
@@ -105,7 +109,7 @@ def main():
     for i, loc in enumerate(LOCATIONS):
         sign_filename = f"sign_{i+1}_{loc.name.replace(' ', '_').replace(',', '')}.stl"
         sign_path = os.path.join(output_dir, sign_filename)
-        distance_str = format_distance(loc.distance_km, units='mi')
+        distance_str = format_distance(loc.distance_km, units=units)
         # Pass bearing to determine sign direction
         generator.generate_sign(loc.name, distance_str, sign_path, loc.bearing)
     
