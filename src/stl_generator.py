@@ -53,7 +53,11 @@ class DirectionSignGenerator:
                  id_pin_length: float = 1.5,
                  id_pin_spacing: float = 3.0,
                  id_pin_clearance: float = 0.2,
-                 id_pin_inset: float = 2.0):
+                 id_pin_inset: float = 2.0,
+                 sign_vertical_spacing: float = 8.0,
+                 magnet_diameter: float = 4.0,
+                 magnet_thickness: float = 1.5,
+                 magnet_clearance: float = 0.2):
         """
         Initialize the sign generator with dimensions (all in mm).
         
@@ -89,6 +93,10 @@ class DirectionSignGenerator:
             id_pin_spacing: Spacing between ID pins on the flat (mm)
             id_pin_clearance: Radial clearance for ID pin holes (mm)
             id_pin_inset: Inset from square end for ID pin holes (mm)
+            sign_vertical_spacing: Vertical spacing between signs (mm)
+            magnet_diameter: Diameter of alignment magnets (mm)
+            magnet_thickness: Thickness of alignment magnets (mm)
+            magnet_clearance: Radial clearance for magnet pockets (mm)
         """
         self.post_height = post_height
         self.post_radius = post_radius
@@ -121,6 +129,10 @@ class DirectionSignGenerator:
         self.id_pin_spacing = id_pin_spacing
         self.id_pin_clearance = id_pin_clearance
         self.id_pin_inset = id_pin_inset
+        self.sign_vertical_spacing = sign_vertical_spacing
+        self.magnet_diameter = magnet_diameter
+        self.magnet_thickness = magnet_thickness
+        self.magnet_clearance = magnet_clearance
 
     def _rotate_mesh_z(self, target_mesh: trimesh.Trimesh, degrees: float,
                        center: Tuple[float, float, float]) -> None:
@@ -247,7 +259,7 @@ class DirectionSignGenerator:
         
         # Configuration
         segments = 64
-        sign_vertical_spacing = 8.0
+        sign_vertical_spacing = self.sign_vertical_spacing
         base_sign_offset = 40.0
         sign_gap_half = sign_vertical_spacing / 2
         segment_height = self.flat_height + sign_vertical_spacing
@@ -564,7 +576,8 @@ class DirectionSignGenerator:
         """
         # Peg dimensions - scale with post radius, ensure key stays within post diameter
         peg_radius = self.post_radius * 0.5  # 50% of post radius (4mm for 8mm post)
-        peg_height = 8.0  # 8mm tall
+        join_max_height = max(0.0, (self.sign_vertical_spacing / 2) - self.sign_clearance)
+        peg_height = min(8.0, join_max_height)
         key_width = self.post_radius * 0.3  # 30% of post radius (2.4mm for 8mm post)
         key_depth = self.post_radius * 0.15  # 15% of post radius (1.2mm for 8mm post)
         
@@ -583,8 +596,25 @@ class DirectionSignGenerator:
         # Position key at +X side of peg (0° reference for alignment keying)
         key_box.apply_translation([peg_radius + key_depth, 0, post_height + peg_height / 2])
         
-        # Combine peg and key
-        return trimesh.util.concatenate([peg, key_box])
+        peg_mesh = trimesh.util.concatenate([peg, key_box])
+        
+        # Add magnet pocket centered on top of peg
+        magnet_radius = (self.magnet_diameter / 2) + self.magnet_clearance
+        magnet_depth = min(self.magnet_thickness + self.magnet_clearance, peg_height)
+        magnet = trimesh.creation.cylinder(
+            radius=magnet_radius,
+            height=magnet_depth,
+            sections=32
+        )
+        magnet.apply_translation([0, 0, post_height + peg_height - magnet_depth / 2])
+        try:
+            new_mesh = peg_mesh.difference(magnet)
+            if new_mesh is not None and len(new_mesh.faces) > 0:
+                peg_mesh = new_mesh
+        except Exception:
+            pass
+        
+        return peg_mesh
     
     def _create_alignment_socket(self, post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:
         """
@@ -601,7 +631,8 @@ class DirectionSignGenerator:
         # Socket dimensions (slightly larger than peg for clearance) - scale with post radius
         peg_radius = self.post_radius * 0.5
         socket_radius = peg_radius + 0.3   # 0.3mm radial clearance
-        socket_depth = 8.5    # 0.5mm deeper than peg
+        join_max_height = max(0.0, (self.sign_vertical_spacing / 2) - self.sign_clearance)
+        socket_depth = min(8.5, join_max_height)
         key_width = self.post_radius * 0.3 + 0.3       # 0.3mm clearance
         key_depth = self.post_radius * 0.15 + 0.3       # 0.3mm clearance
         
@@ -624,8 +655,23 @@ class DirectionSignGenerator:
             socket_depth / 2
         ])
         
-        # Combine socket and key slot
-        return trimesh.util.concatenate([socket, key_slot])
+        socket_mesh = trimesh.util.concatenate([socket, key_slot])
+        
+        # Add magnet pocket centered on bottom of socket (as cutter volume)
+        magnet_radius = (self.magnet_diameter / 2) + self.magnet_clearance
+        magnet_depth = min(self.magnet_thickness + self.magnet_clearance, socket_depth)
+        magnet = trimesh.creation.cylinder(
+            radius=magnet_radius,
+            height=magnet_depth,
+            sections=32
+        )
+        magnet.apply_translation([
+            post_x_offset,
+            post_y_offset,
+            magnet_depth / 2
+        ])
+        
+        return trimesh.util.concatenate([socket_mesh, magnet])
     
     def _create_box_mesh_at_bearing(self, bearing: float, sign_height: float,
                                     post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:
