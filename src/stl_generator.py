@@ -370,55 +370,43 @@ class DirectionSignGenerator:
     
     def _create_north_arrow(self) -> trimesh.Trimesh:
         """
-        Create a north arrow indicator mesh to sit on top of the base.
-        Arrow points in the +X direction to indicate north (bearing 0°).
+        Create a north indicator mesh ("N") to sit on top of the base.
+        The letter is oriented toward +X to indicate north (bearing 0°).
         
         Returns:
-            trimesh.Trimesh: North arrow mesh
+            trimesh.Trimesh: North indicator mesh
         """
-        arrow_height = 2.0  # Height of arrow above base
-        arrow_base_x = self.base_radius * 0.6
-        arrow_tip_x = self.base_radius * 0.85
+        letter_thickness = 2.0  # Height above base
+        letter_height = min(self.arrow_length * 0.6, self.base_radius * 0.25)
+        letter_width = letter_height * 0.6
+        stroke = max(letter_width * 0.22, 1.0)
         
-        # Arrow shaft (rectangle) - pointing in +X direction (north)
-        shaft_width = self.arrow_width * 0.3
-        shaft_depth = self.arrow_length * 0.3
-        shaft_box = trimesh.creation.box(extents=[shaft_depth, shaft_width, arrow_height])
-        shaft_box.apply_translation([arrow_base_x - shaft_depth/2, 0, self.base_height + arrow_height/2])
+        # Build a blocky "N" in the XY plane, then extrude in Z.
+        z_center = self.base_height + letter_thickness / 2
+        left_bar = trimesh.creation.box(extents=[letter_height, stroke, letter_thickness])
+        left_bar.apply_translation([letter_height / 2, -letter_width / 2 + stroke / 2, z_center])
         
-        # Arrow head (triangular prism) - pointing in +X direction (north)
-        vertices = []
-        faces = []
+        right_bar = trimesh.creation.box(extents=[letter_height, stroke, letter_thickness])
+        right_bar.apply_translation([letter_height / 2, letter_width / 2 - stroke / 2, z_center])
         
-        # Bottom triangle
-        vertices.extend([
-            [arrow_base_x, -self.arrow_width/2, self.base_height],
-            [arrow_base_x, self.arrow_width/2, self.base_height],
-            [arrow_tip_x, 0, self.base_height],
-        ])
-        # Top triangle
-        vertices.extend([
-            [arrow_base_x, -self.arrow_width/2, self.base_height + arrow_height],
-            [arrow_base_x, self.arrow_width/2, self.base_height + arrow_height],
-            [arrow_tip_x, 0, self.base_height + arrow_height],
-        ])
+        diag_length = math.hypot(letter_height - stroke, letter_width - stroke)
+        diag_bar = trimesh.creation.box(extents=[diag_length, stroke, letter_thickness])
+        diag_angle = math.atan2(letter_width - stroke, letter_height - stroke)
+        diag_bar.apply_transform(trimesh.transformations.rotation_matrix(diag_angle, [0, 0, 1]))
+        diag_bar.apply_translation([letter_height / 2, 0, z_center])
         
-        # Faces
-        faces.extend([
-            # Bottom
-            [0, 2, 1],
-            # Top
-            [3, 4, 5],
-            # Sides
-            [0, 1, 3], [1, 4, 3],
-            [1, 2, 4], [2, 5, 4],
-            [2, 0, 5], [0, 3, 5],
-        ])
+        letter_mesh = trimesh.util.concatenate([left_bar, right_bar, diag_bar])
         
-        head_mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+        # Position on the north side of the base (+X direction).
+        base_x = self.base_radius * 0.6
+        max_x = self.base_radius * 0.85
+        if base_x + letter_height > max_x:
+            base_x = max_x - letter_height
+        if base_x < 0:
+            base_x = 0
+        letter_mesh.apply_translation([base_x, 0, 0])
         
-        # Combine shaft and head
-        return trimesh.util.concatenate([shaft_box, head_mesh])
+        return letter_mesh
     
     def _create_coordinates_text(self, latitude: float, longitude: float) -> List[trimesh.Trimesh]:
         """
