@@ -24,17 +24,17 @@ class Location:
 
 
 # Home location (reference point where the sign will sit)
-# HOME = Location(
-#    name="711 Green Lane",
-#    latitude=39.73059345761767,
-#    longitude=-75.16805997015658
-#)
-
 HOME = Location(
-    name="3760 Midvale",
-    latitude=34.017087145650365,
-    longitude=-118.41112430469079
+    name="711 Green Lane",
+    latitude=39.73059345761767,
+    longitude=-75.16805997015658
 )
+
+#HOME = Location(
+#    name="3760 Midvale",
+#    latitude=34.017087145650365,
+#    longitude=-118.41112430469079
+#)
 
 # Destinations to point to
 LOCATIONS = [
@@ -44,11 +44,11 @@ LOCATIONS = [
     Location("Rome", 41.9028, 12.4964, font="Arial", color="red"),
     Location("Boston", 42.33813538280124, -71.09011637177542, font="Arial", color="maroon"),
     Location("Philadelphia", 39.93617180632561, -75.16416042623342, font="Arial", color="orange"),
-    Location("Mullica Hill", 39.73059345761767, -75.16805997015658, font="Arial", color="purple"),
+    Location("Los Angeles", 34.06965322948626, -118.44078368287897, font="Arial", color="purple"),
 ]
 
  # Location("Los Angeles", 34.06965322948626, -118.44078368287897, font="Arial", color="purple"),
-
+ # Location("Mullica Hill", 39.73059345761767, -75.16805997015658, font="Arial", color="purple"),
 
 def main():
     """Main entry point for generating direction sign STLs."""

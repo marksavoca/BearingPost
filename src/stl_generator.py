@@ -151,6 +151,15 @@ class DirectionSignGenerator:
         y_pos = sign_height / 2
         hole.apply_translation([x_pos, y_pos, hole_depth / 2])
         return hole
+
+    def _split_distance_text(self, distance_text: str) -> Tuple[str, str]:
+        """Split distance into value and units for two-line display."""
+        if not distance_text:
+            return "", ""
+        parts = distance_text.strip().split()
+        if len(parts) >= 2:
+            return " ".join(parts[:-1]), parts[-1]
+        return distance_text.strip(), ""
     
     def generate_post(self, bearings: List[float], output_path: str, home_lat: float = None, home_lon: float = None):
         """
@@ -846,51 +855,86 @@ class DirectionSignGenerator:
         # Create the basic sign shape parameters
         point_length = sign_height * 0.5  # Point extends half the sign height
         
-        # Use maximum font size for main text (no distance text)
+        # Use maximum font size for main text (adjusted later to fit distance text)
         font_size = min(self.max_font_size, sign_height * 0.8)
+        distance_value, distance_units = self._split_distance_text(distance)
+        distance_font_size = min(self.max_font_size * 0.5, sign_height * 0.38)
+        distance_font_size = min(distance_font_size, font_size * 0.65)
+        min_distance_font_size = 5.0
+        distance_font_size = max(min_distance_font_size, distance_font_size)
+        units_font_size = max(min_distance_font_size, distance_font_size * 0.85)
         
-        # Calculate text width
-        # Uppercase text is wider, use better estimate: ~0.6 * font_size per character
+        # Calculate text width (layout estimate)
+        # Uppercase text is wider; add margin to reduce overlap risk.
+        name_width_factor = 0.65
+        distance_width_factor = 0.6
+        distance_width_margin = 2.0
         main_text_len = len(text.upper())
-        main_text_width = main_text_len * font_size * 0.6
+        main_text_width = main_text_len * font_size * name_width_factor
+        def compute_distance_width() -> float:
+            value_width = len(distance_value) * distance_font_size * distance_width_factor
+            units_width = len(distance_units) * units_font_size * distance_width_factor
+            return max(value_width, units_width) + distance_width_margin
+
+        distance_width = compute_distance_width()
         
         # Minimum readable size
         min_main_font = 12.0  # Main text must be at least 12mm
         
-        # Padding: main text centered or slightly toward attachment end
-        left_padding_pct = 0.05
-        right_padding_pct = 0.05
+        # Layout paddings and spacing
+        attach_padding = 10.0
+        tip_padding = 3.0
+        base_text_gap = 16.0
+        text_gap = max(10.0, base_text_gap - max(0, main_text_len - 6) * 1.2)
         
         # Try to fit text at max sign length
         sign_length = self.max_sign_length
         body_length = sign_length - point_length
-        
-        left_padding = body_length * left_padding_pct
-        right_padding = body_length * right_padding_pct
-        available_width = body_length - left_padding - right_padding
-        
-        if main_text_width <= available_width:
-            # Fits perfectly at max font size!
-            # Reduce sign length to actual needed width for efficiency
-            optimal_body_length = main_text_width + left_padding + right_padding + 10.0  # 10mm margin
-            
-            # Only reduce if significantly shorter (save at least 20mm)
-            if optimal_body_length < body_length - 20.0:
-                body_length = optimal_body_length
-                sign_length = body_length + point_length
+
+        def compute_required_body_length() -> float:
+            return attach_padding + main_text_width + text_gap + distance_width + tip_padding
+
+        required_body_length = compute_required_body_length()
+        print(
+            f"  Layout widths: name={main_text_width:.1f}mm, "
+            f"distance={distance_width:.1f}mm, "
+            f"required_body={required_body_length:.1f}mm, "
+            f"body_length={body_length:.1f}mm"
+        )
+        if required_body_length < body_length:
+            optimal_length = required_body_length + point_length
+            if optimal_length < sign_length:
+                sign_length = max(60.0, optimal_length)
+                body_length = sign_length - point_length
                 print(f"  Note: Reduced sign length to {sign_length:.1f}mm to fit text")
-        else:
-            # Reduce font size proportionally to fit within max length
-            scale_factor = available_width / main_text_width
-            font_size = font_size * scale_factor
-            
-            # Check if we're below minimum readable size
-            if font_size < min_main_font:
-                font_size = min_main_font
-                print(f"  Note: Using minimum font size {min_main_font}mm")
+        elif required_body_length > body_length:
+            # Reduce font size(s) until both texts fit within max length
+            while required_body_length > body_length and (font_size > min_main_font or distance_font_size > min_distance_font_size):
+                if font_size > min_main_font:
+                    font_size = max(min_main_font, font_size - 0.5)
+                else:
+                    distance_font_size = max(min_distance_font_size, distance_font_size - 0.5)
+                    units_font_size = max(min_distance_font_size, distance_font_size * 0.85)
+                distance_font_size = min(distance_font_size, font_size * 0.65)
+                units_font_size = max(min_distance_font_size, distance_font_size * 0.85)
+                main_text_width = main_text_len * font_size * name_width_factor
+                distance_width = compute_distance_width()
+                required_body_length = compute_required_body_length()
+            print(
+                f"  Layout after sizing: name={main_text_width:.1f}mm, "
+                f"distance={distance_width:.1f}mm, "
+                f"required_body={required_body_length:.1f}mm, "
+                f"body_length={body_length:.1f}mm, "
+                f"font={font_size:.1f}mm, dist_font={distance_font_size:.1f}mm"
+            )
+            if required_body_length > body_length:
+                print(f"  Warning: Text may overlap; name text at minimum size")
         
         # Final calculations
-        main_text_width = main_text_len * font_size * 0.6
+        distance_font_size = min(distance_font_size, font_size * 0.65)
+        units_font_size = max(min_distance_font_size, distance_font_size * 0.85)
+        distance_width = compute_distance_width()
+        main_text_width = main_text_len * font_size * name_width_factor
         
         # Clamp font size
         font_size = max(self.min_font_size, min(font_size, self.max_font_size))
@@ -902,8 +946,16 @@ class DirectionSignGenerator:
         # Final body_length calculation
         body_length = sign_length - point_length
         
+        # After font adjustments, shrink again if there is extra space.
+        required_body_length = compute_required_body_length()
+        if required_body_length < body_length:
+            sign_length = max(60.0, required_body_length + point_length)
+            body_length = sign_length - point_length
+            print(f"  Note: Reduced sign length to {sign_length:.1f}mm to fit text")
+        
         print(f"  Sign dimensions: {sign_length:.1f}mm long × {sign_height:.1f}mm tall × {self.sign_thickness:.1f}mm thick")
         print(f"  Font size: {font_size:.1f}mm")
+        print(f"  Distance font: {distance_font_size:.1f}mm")
         
         # Create the basic sign shape (pointed on one end, square on the other)
         # The pointed end will aim toward the location
@@ -971,22 +1023,42 @@ class DirectionSignGenerator:
                 # Create main text mesh
                 # Position: near square end (attachment point), vertically centered
                 if point_left:
-                    # Square end is at right (X=sign_length), text near right edge
-                    # Text starts at: sign_length minus padding minus text_width
-                    padding = 15.0  # 15mm from edge for safety
-                    text_x = sign_length - padding - (main_text_width * 1.1)  # Add 10% safety margin
-                    print(f"  Left-pointing sign: text_x={text_x:.1f}, sign_length={sign_length:.1f}, text_width={main_text_width:.1f}")
+                    text_x = sign_length - attach_padding - main_text_width
                 else:
-                    # Square end is at left (X=0), text near left edge
-                    padding = 10.0  # 10mm from edge
-                    text_x = padding
+                    text_x = attach_padding
                 text_y = (sign_height / 2) - (font_size / 2.8)  # Adjusted for baseline offset
                 text_z = self.sign_thickness
                 
                 text_mesh = self._create_text_mesh_vector(text, font_size, (text_x, text_y, text_z))
                 
+                # Create distance text meshes near the arrow end
+                distance_meshes = []
+                if distance_value:
+                    if point_left:
+                        distance_x = point_length + tip_padding
+                    else:
+                        distance_x = body_length - tip_padding - distance_width
+                    row_offset = distance_font_size * 0.8
+                    top_center = (sign_height / 2) + (row_offset / 2)
+                    bottom_center = (sign_height / 2) - (row_offset / 2)
+                    dist_y = top_center - (distance_font_size / 2.8)
+                    units_y = bottom_center - (units_font_size / 2.8) - (distance_font_size * 0.2)
+                    distance_meshes.append(
+                        self._create_text_mesh_vector(distance_value, distance_font_size, (distance_x, dist_y, text_z))
+                    )
+                    if distance_units:
+                        value_width = len(distance_value) * distance_font_size * distance_width_factor
+                        units_width = len(distance_units) * units_font_size * distance_width_factor
+                        units_x = distance_x + (value_width - units_width) / 2
+                        distance_meshes.append(
+                            self._create_text_mesh_vector(distance_units, units_font_size, (units_x, units_y, text_z))
+                        )
+                
                 # Combine base and text
-                sign_mesh = trimesh.util.concatenate([sign_base, text_mesh])
+                meshes = [sign_base, text_mesh]
+                if distance_meshes:
+                    meshes.extend(distance_meshes)
+                sign_mesh = trimesh.util.concatenate(meshes)
                 print(f"  Text embossed: '{text}'")
                 
             except Exception as e:
