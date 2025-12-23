@@ -32,6 +32,12 @@ source venv/bin/activate  # On Windows: venv\\Scripts\\activate
 pip install -r requirements.txt
 ```
 
+For cleaner unions (single-shell STLs), install the manifold boolean backend:
+
+```bash
+pip install manifold3d
+```
+
 ## Usage
 
 Generate parts from a config file:
@@ -96,6 +102,7 @@ For a config named `example.json`, the generator outputs:
 - Segment IDs are encoded using 4 vertical ID pins (1–15). If you exceed 15 segments, the generator falls back to the single center pin/hole for that segment.
 - Magnet pockets are centered and sized for 4×1.5 mm magnets with clearance (glue fit).
 - The base includes a bottom engraving: `Mark W Savoca © <current year>`.
+- The generator requires the manifold boolean engine for clean unions.
 
 ## License
 

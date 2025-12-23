@@ -103,6 +103,8 @@ class DirectionSignGenerator:
         """
         self.debug = debug
         self._print = print if self.debug else (lambda *args, **kwargs: None)
+        self.boolean_overlap = 0.1
+        self._warned_no_boolean_engine = False
         self.post_height = post_height
         self.post_radius = post_radius
         self.base_radius = base_radius
@@ -139,6 +141,25 @@ class DirectionSignGenerator:
         self.magnet_thickness = magnet_thickness
         self.magnet_clearance = magnet_clearance
 
+    def _get_boolean_engine(self) -> str | None:
+        available = getattr(trimesh.boolean, "engines_available", set())
+        if "manifold" in available:
+            return "manifold"
+        raise RuntimeError("manifold boolean engine not available. Install manifold3d.")
+
+    def _prepare_mesh_for_boolean(self, mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+        """Return a cleaned mesh for boolean operations."""
+        cleaned = mesh.copy()
+        try:
+            cleaned.remove_degenerate_faces()
+            cleaned.remove_duplicate_faces()
+            cleaned.remove_unreferenced_vertices()
+            cleaned.merge_vertices()
+            cleaned.process(validate=True)
+        except Exception:
+            pass
+        return cleaned
+
     def _rotate_mesh_z(self, target_mesh: trimesh.Trimesh, degrees: float,
                        center: Tuple[float, float, float]) -> None:
         """Rotate a mesh around the Z axis in-place."""
@@ -153,6 +174,53 @@ class DirectionSignGenerator:
         center_x = (bounds[0][0] + bounds[1][0]) / 2
         center_y = (bounds[0][1] + bounds[1][1]) / 2
         target_mesh.apply_translation([-center_x, -center_y, 0])
+
+    def _union_meshes(self, meshes: List[trimesh.Trimesh]) -> trimesh.Trimesh:
+        """Boolean-union meshes into a single solid; fall back to concat on failure."""
+        if not meshes:
+            raise ValueError("No meshes to union")
+        engine = self._get_boolean_engine()
+        if engine is None and not self._warned_no_boolean_engine:
+            self._print("  Warning: No boolean engine available; meshes may remain separate shells")
+            self._warned_no_boolean_engine = True
+        if engine is None:
+            return trimesh.util.concatenate(meshes)
+        try:
+            cleaned_meshes = [self._prepare_mesh_for_boolean(m) for m in meshes]
+            unioned = trimesh.boolean.union(
+                cleaned_meshes,
+                engine=engine,
+                use_exact=False,
+                check_volume=False,
+                debug=self.debug
+            )
+            if unioned is not None and len(unioned.faces) > 0:
+                return unioned
+            self._print("  Warning: Boolean union returned empty mesh; retrying exact mode")
+            unioned = trimesh.boolean.union(
+                meshes,
+                engine=engine,
+                use_exact=True,
+                use_self=True,
+                check_volume=False,
+                debug=self.debug
+            )
+            if unioned is not None and len(unioned.faces) > 0:
+                return unioned
+            self._print("  Warning: Boolean union returned empty mesh; falling back to concat")
+        except Exception as e:
+            self._print(f"  Warning: Boolean union failed: {e}")
+        return trimesh.util.concatenate(meshes)
+
+    def _log_components(self, mesh: trimesh.Trimesh, label: str) -> None:
+        """Log connected component count for debugging union results."""
+        if not self.debug:
+            return
+        try:
+            parts = mesh.split(only_watertight=False)
+            self._print(f"    Components ({label}): {len(parts)}")
+        except Exception as e:
+            self._print(f"    Warning: Could not compute components for {label}: {e}")
 
     def _create_base_bottom_text_mesh(self, text: str, engraving_depth: float) -> trimesh.Trimesh:
         """Create mirrored text mesh for bottom engraving."""
@@ -177,8 +245,8 @@ class DirectionSignGenerator:
         pin.apply_transform(trimesh.transformations.rotation_matrix(
             math.radians(90), [1, 0, 0]
         ))
-        # Place pin so it protrudes from the flat surface.
-        radial_center = self.post_radius - self.flat_depth + (self.index_pin_length / 2)
+        # Place pin so it protrudes from the flat surface and overlaps the post.
+        radial_center = self.post_radius - self.flat_depth + (self.index_pin_length / 2) - self.boolean_overlap
         pin.apply_translation([0, radial_center, sign_height])
         # Rotate around post center by bearing (match box subtraction orientation).
         rotation_matrix = trimesh.transformations.rotation_matrix(
@@ -227,7 +295,7 @@ class DirectionSignGenerator:
             pin.apply_transform(trimesh.transformations.rotation_matrix(
                 math.radians(90), [1, 0, 0]
             ))
-            radial_center = self.post_radius - self.flat_depth + (self.id_pin_length / 2)
+            radial_center = self.post_radius - self.flat_depth + (self.id_pin_length / 2) - self.boolean_overlap
             pin.apply_translation([0, radial_center, sign_height + x_offset])
             rotation_matrix = trimesh.transformations.rotation_matrix(
                 math.radians(-bearing), [0, 0, 1], [0, 0, 0]
@@ -335,7 +403,8 @@ class DirectionSignGenerator:
             base_meshes.extend(compass_meshes)
         if coords_meshes:
             base_meshes.extend(coords_meshes)
-        base_segment = trimesh.util.concatenate(base_meshes)
+        base_segment = self._union_meshes(base_meshes)
+        self._log_components(base_segment, "base segment")
         base_segment_path = f"{output_base}_base_segment.stl"
         base_segment.export(base_segment_path)
         self._print(f"  Saved: {base_segment_path}")
@@ -359,6 +428,7 @@ class DirectionSignGenerator:
                 sections=segments
             )
             segment_mesh.apply_translation([0, 0, segment_height / 2])
+            add_meshes = []
             if not is_spacer and bearing is not None:
                 adjusted_bearing = (bearing + 90.0) % 360.0
                 box_mesh = self._create_box_mesh_at_bearing(adjusted_bearing, segment_sign_center, 0, 0)
@@ -375,12 +445,12 @@ class DirectionSignGenerator:
                     id_pin_mesh = self._create_id_pins_at_bearing(
                         adjusted_bearing, segment_sign_center, 0, 0, segment_id
                     )
-                    segment_mesh = trimesh.util.concatenate([segment_mesh, id_pin_mesh])
+                    add_meshes.append(id_pin_mesh)
                 else:
                     if segment_id is not None and segment_id > 15:
                         self._print(f"      Note: segment_id {segment_id} exceeds 15; using center pin only")
                     center_pin_mesh = self._create_index_pin_at_bearing(adjusted_bearing, segment_sign_center, 0, 0)
-                    segment_mesh = trimesh.util.concatenate([segment_mesh, center_pin_mesh])
+                    add_meshes.append(center_pin_mesh)
             
             socket_mesh = self._create_alignment_socket(0, 0)
             try:
@@ -403,7 +473,10 @@ class DirectionSignGenerator:
                 self._print(f"      Warning: Magnet boolean failed: {e}")
             
             peg_mesh = self._create_alignment_peg(segment_height)
-            segment_mesh = trimesh.util.concatenate([segment_mesh, peg_mesh])
+            add_meshes.append(peg_mesh)
+            if add_meshes:
+                segment_mesh = self._union_meshes([segment_mesh] + add_meshes)
+            self._log_components(segment_mesh, f"segment {i+1}")
             
             segment_path = f"{output_base}_segment_{i+1}.stl"
             segment_mesh.export(segment_path)
@@ -439,6 +512,7 @@ class DirectionSignGenerator:
             self._print(f"    Warning: Topper magnet boolean failed: {e}")
         
         topper_path = f"{output_base}_topper.stl"
+        self._log_components(topper_mesh, "topper")
         topper_mesh.export(topper_path)
         self._print(f"  Saved: {topper_path}")
     
@@ -452,8 +526,8 @@ class DirectionSignGenerator:
         """
         if FREETYPE_AVAILABLE:
             font_size = min(self.arrow_length * 0.9, self.base_radius * 0.3)
-            z_center = self.base_height + self.text_height / 2
-            letter_mesh = self._create_text_mesh_vector("N", font_size, (0, 0, z_center))
+            z_base = self.base_height - self.boolean_overlap
+            letter_mesh = self._create_text_mesh_vector("N", font_size, (0, 0, z_base))
             self._center_mesh_xy(letter_mesh)
             bounds = letter_mesh.bounds
             letter_height = bounds[1][1] - bounds[0][1]
@@ -465,7 +539,7 @@ class DirectionSignGenerator:
             stroke = max(letter_width * 0.22, 1.0)
             
             # Build a blocky "N" in the XY plane, then extrude in Z.
-            z_center = self.base_height + letter_thickness / 2
+            z_center = self.base_height - self.boolean_overlap + letter_thickness / 2
             y_center = letter_height / 2
             left_bar = trimesh.creation.box(extents=[stroke, letter_height, letter_thickness])
             left_bar.apply_translation([-letter_width / 2 + stroke / 2, y_center, z_center])
@@ -501,7 +575,7 @@ class DirectionSignGenerator:
         meshes = []
         # Letters
         if FREETYPE_AVAILABLE:
-            z_center = self.base_height + self.text_height / 2
+            z_base = self.base_height - self.boolean_overlap
             north_font = min(self.arrow_length * 0.9, self.base_radius * 0.3)
             other_font = north_font * 0.85
             letter_radius = self.base_radius * 0.7
@@ -513,7 +587,7 @@ class DirectionSignGenerator:
                 angle = math.radians(bearing_deg)
                 x = math.sin(angle) * letter_radius
                 y = math.cos(angle) * letter_radius
-                letter_mesh = self._create_text_mesh_vector(letter, size, (0, 0, z_center))
+                letter_mesh = self._create_text_mesh_vector(letter, size, (0, 0, z_base))
                 self._center_mesh_xy(letter_mesh)
                 letter_mesh.apply_translation([x, y, 0])
                 meshes.append(letter_mesh)
@@ -525,8 +599,9 @@ class DirectionSignGenerator:
         try:
             outer = trimesh.creation.cylinder(radius=outer_radius, height=ring_height, sections=96)
             inner = trimesh.creation.cylinder(radius=inner_radius, height=ring_height, sections=96)
-            outer.apply_translation([0, 0, self.base_height + ring_height / 2])
-            inner.apply_translation([0, 0, self.base_height + ring_height / 2])
+            z_center = self.base_height - self.boolean_overlap + ring_height / 2
+            outer.apply_translation([0, 0, z_center])
+            inner.apply_translation([0, 0, z_center])
             ring = outer.difference(inner)
             if ring is not None and len(ring.faces) > 0:
                 meshes.append(ring)
@@ -549,7 +624,8 @@ class DirectionSignGenerator:
             else:
                 tick_length = tick_length_small
             tick = trimesh.creation.box(extents=[tick_width, tick_length, tick_height])
-            tick.apply_translation([0, tick_radius - tick_length / 2, self.base_height + tick_height / 2])
+            z_center = self.base_height - self.boolean_overlap + tick_height / 2
+            tick.apply_translation([0, tick_radius - tick_length / 2, z_center])
             tick.apply_transform(trimesh.transformations.rotation_matrix(angle, [0, 0, 1]))
             meshes.append(tick)
         
@@ -578,7 +654,7 @@ class DirectionSignGenerator:
             # Font size for coordinates (small, readable)
             font_size = self.base_text_font_size
             text_height = self.base_text_height
-            base_z = self.base_height + text_height
+            base_z = self.base_height - self.boolean_overlap
             # Both texts on south side (-Y), centered horizontally
             y_pos = -self.base_radius * self.base_text_radius_factor
             gap = self.base_text_gap
@@ -619,22 +695,23 @@ class DirectionSignGenerator:
         key_width = self.post_radius * 0.3  # 30% of post radius (2.4mm for 8mm post)
         key_depth = self.post_radius * 0.15  # 15% of post radius (1.2mm for 8mm post)
         
-        # Create main cylindrical peg
+        # Create main cylindrical peg (overlap slightly with the post for union).
+        z_base = post_height - self.boolean_overlap
         peg = trimesh.creation.cylinder(
             radius=peg_radius,
             height=peg_height,
             sections=32
         )
-        peg.apply_translation([0, 0, post_height + peg_height / 2])
+        peg.apply_translation([0, 0, z_base + peg_height / 2])
         
         # Create alignment key (rectangular protrusion at 0° / +X reference)
         key_box = trimesh.creation.box(
             extents=[key_width, key_depth * 2, peg_height]
         )
         # Position key at south side (-Y) for alignment reference
-        key_box.apply_translation([0, -(peg_radius + key_depth), post_height + peg_height / 2])
+        key_box.apply_translation([0, -(peg_radius + key_depth - self.boolean_overlap), z_base + peg_height / 2])
         
-        peg_mesh = trimesh.util.concatenate([peg, key_box])
+        peg_mesh = self._union_meshes([peg, key_box])
         
         # Add magnet pocket centered on top of peg
         magnet_radius = (self.magnet_diameter / 2) + self.magnet_clearance
@@ -644,7 +721,7 @@ class DirectionSignGenerator:
             height=magnet_depth,
             sections=32
         )
-        magnet.apply_translation([0, 0, post_height + peg_height - magnet_depth / 2])
+        magnet.apply_translation([0, 0, z_base + peg_height - magnet_depth / 2])
         try:
             new_mesh = peg_mesh.difference(magnet)
             if new_mesh is not None and len(new_mesh.faces) > 0:
@@ -1133,7 +1210,7 @@ class DirectionSignGenerator:
                 else:
                     text_x = attach_padding
                 text_y = (sign_height / 2) - (font_size / 2.8)  # Adjusted for baseline offset
-                text_z = self.sign_thickness
+                text_z = self.sign_thickness - self.boolean_overlap
                 
                 text_mesh = self._create_text_mesh_vector(text, font_size, (text_x, text_y, text_z))
                 
@@ -1161,10 +1238,7 @@ class DirectionSignGenerator:
                         )
                 
                 # Combine base and text
-                meshes = [sign_base, text_mesh]
-                if distance_meshes:
-                    meshes.extend(distance_meshes)
-                sign_mesh = trimesh.util.concatenate(meshes)
+                sign_mesh = self._union_meshes([sign_base, text_mesh] + distance_meshes)
                 self._print(f"  Text embossed: '{text}'")
                 
             except Exception as e:
@@ -1175,6 +1249,7 @@ class DirectionSignGenerator:
                 sign_mesh = sign_base
         
         # Export
+        self._log_components(sign_mesh, f"sign '{text}'")
         sign_mesh.export(output_path)
         self._print(f"  Saved: {output_path}")
     
