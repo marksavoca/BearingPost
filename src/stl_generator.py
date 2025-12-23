@@ -6,6 +6,7 @@ from typing import List, Tuple
 import numpy as np
 from stl import mesh
 import math
+import os
 import trimesh
 
 # Try to import optional text rendering libraries
@@ -163,11 +164,10 @@ class DirectionSignGenerator:
     
     def generate_post(self, bearings: List[float], output_path: str, home_lat: float = None, home_lon: float = None):
         """
-        Generate two post sections with flat indents at specified bearings.
-        Creates a two-piece design to fit within 210mm print height.
-        Uses boolean subtraction to create flat mounting surfaces.
-        Signs are ordered from top to bottom matching the input bearings list.
-        The first (taller) post includes the base with north arrow.
+        Generate a base segment plus one post segment per sign, and a topper cap.
+        Each sign segment has a single flat indent centered with half-gap above/below.
+        The base segment includes the base and a post stub with an alignment peg.
+        Each sign segment has a bottom alignment socket and a top alignment peg.
         
         Args:
             bearings: List of bearings (in degrees) where signs will attach, ordered top to bottom
@@ -175,185 +175,112 @@ class DirectionSignGenerator:
             home_lat: Home latitude to emboss on base (optional)
             home_lon: Home longitude to emboss on base (optional)
         """
-        print(f"Generating 2-piece post with {len(bearings)} flat indents...")
-        
-        all_meshes = []
+        print(f"Generating segmented post with {len(bearings)} sign segments...")
         
         # Configuration
         segments = 64
-        post_separation = 150.0  # Distance between the two posts when laid side by side
-        max_post_height = 200.0  # Maximum height for each post section
         sign_vertical_spacing = 8.0
         base_sign_offset = 40.0
-        top_padding = 8.0
+        sign_gap_half = sign_vertical_spacing / 2
+        segment_height = self.flat_height + sign_vertical_spacing
+        segment_sign_center = sign_gap_half + self.flat_height / 2
+        base_post_height = max(0.0, base_sign_offset - segment_sign_center)
         
-        # Calculate sign distribution and heights
-        # Account for base height in the first post
-        base_height_offset = self.base_height
-        bottom_start_height = base_height_offset + base_sign_offset
-        sign_increment = self.flat_height + sign_vertical_spacing
+        output_base = os.path.splitext(output_path)[0]
         
-        # Determine how many signs fit on bottom post (taller post)
-        num_signs_bottom = 0
-        current_height = bottom_start_height
-        while current_height + self.flat_height <= max_post_height and num_signs_bottom < len(bearings):
-            num_signs_bottom += 1
-            current_height += sign_increment
-        
-        # Calculate actual bottom post height (last sign center + half flat height + padding)
-        bottom_post_height = bottom_start_height + (num_signs_bottom - 1) * sign_increment + self.flat_height / 2 + top_padding
-        
-        # Remaining signs go on top post (shorter post)
-        num_signs_top = len(bearings) - num_signs_bottom
-        
-        # Calculate top post height
-        if num_signs_top > 0:
-            # First sign BOTTOM should be at 8mm above Z=0
-            # Since we position by center, center = bottom + flat_height/2
-            top_start_height = sign_vertical_spacing + self.flat_height / 2
-            # Post height goes from 0 to (last sign center + half flat height + padding)
-            top_post_height = top_start_height + (num_signs_top - 1) * sign_increment + self.flat_height / 2 + top_padding
-        else:
-            top_post_height = 0
-            top_start_height = 0
-        
-        print(f"  First post (taller, with base): {num_signs_bottom} signs, height: {bottom_post_height:.1f}mm (including {base_height_offset:.1f}mm base)")
-        print(f"  Second post (shorter): {num_signs_top} signs, height: {top_post_height:.1f}mm")
-        print(f"  Sign increment: {sign_increment:.1f}mm (flat_height {self.flat_height} + spacing 8mm)")
-        
-        # ===== CREATE FIRST POST (TALLER) WITH BASE =====
-        print("  Creating first post with base...")
-        
-        # Create base
+        # ===== BASE SEGMENT (BASE + POST STUB + PEG) =====
+        print("  Creating base segment...")
         base_mesh = trimesh.creation.cylinder(
             radius=self.base_radius,
             height=self.base_height,
-            sections=64
+            sections=segments
         )
         base_mesh.apply_translation([0, 0, self.base_height / 2])
         
-        # Create north arrow on top of base
         arrow_mesh = self._create_north_arrow()
-        
-        # Create coordinates text on base if provided
         coords_meshes = []
         if home_lat is not None and home_lon is not None:
             coords_meshes = self._create_coordinates_text(home_lat, home_lon)
         
-        # Create post cylinder
-        bottom_post_mesh = trimesh.creation.cylinder(
+        base_post_mesh = trimesh.creation.cylinder(
             radius=self.post_radius,
-            height=bottom_post_height,
-            sections=64
+            height=base_post_height,
+            sections=segments
         )
-        # Trimesh creates cylinder centered at origin, translate to sit on top of base
-        bottom_post_mesh.apply_translation([0, 0, bottom_post_height / 2])
+        base_post_mesh.apply_translation([0, 0, base_post_height / 2])
         
-        # Subtract boxes for first post signs
-        # First post gets the LAST num_signs_bottom locations, in reverse order (bottom to top)
-        print("  Subtracting boxes from first post...")
-        bottom_pin_meshes = []
-        for i in range(num_signs_bottom):
-            # Get bearing from end of list, working backwards
-            bearing_index = len(bearings) - 1 - i
-            bearing = bearings[bearing_index]
-            sign_height = bottom_start_height + (i * sign_increment)
-            
-            print(f"    Box {i+1}: bearing {bearing:.1f}° (location #{bearing_index+1}), height {sign_height:.1f}mm")
-            
-            box_mesh = self._create_box_mesh_at_bearing(bearing, sign_height, 0, 0)
-            try:
-                new_mesh = bottom_post_mesh.difference(box_mesh)
-                if new_mesh is not None and len(new_mesh.faces) > 0:
-                    bottom_post_mesh = new_mesh
-                else:
-                    print(f"      Warning: Boolean operation returned empty mesh")
-            except Exception as e:
-                print(f"      Warning: Boolean operation failed: {e}")
-            
-            bottom_pin_meshes.append(
-                self._create_index_pin_at_bearing(bearing, sign_height, 0, 0)
-            )
-        
-        # Combine base, arrow, coordinates text, and post
-        print("  Combining base, arrow, coordinates, and post...")
-        
-        # Add alignment peg on top of first post
-        print("  Adding alignment peg to first post...")
-        peg_mesh = self._create_alignment_peg(bottom_post_height)
-        
-        meshes_to_combine = [base_mesh, arrow_mesh, bottom_post_mesh, peg_mesh]
-        if bottom_pin_meshes:
-            meshes_to_combine.extend(bottom_pin_meshes)
+        peg_mesh = self._create_alignment_peg(base_post_height)
+        base_meshes = [base_mesh, arrow_mesh, base_post_mesh, peg_mesh]
         if coords_meshes:
-            meshes_to_combine.extend(coords_meshes)
+            base_meshes.extend(coords_meshes)
+        base_segment = trimesh.util.concatenate(base_meshes)
+        base_segment_path = f"{output_base}_base_segment.stl"
+        base_segment.export(base_segment_path)
+        print(f"  Saved: {base_segment_path}")
         
-        combined_first_post = trimesh.util.concatenate(meshes_to_combine)
-        all_meshes.append(combined_first_post)
-        
-        # ===== CREATE SECOND POST (SHORTER, offset to the side) =====
-        if num_signs_top > 0:
-            print("  Creating second post cylinder...")
-            x_offset = post_separation
-            
-            top_post_mesh = trimesh.creation.cylinder(
+        # ===== SIGN SEGMENTS =====
+        print("  Creating sign segments...")
+        for i, bearing in enumerate(bearings):
+            print(f"    Segment {i+1}: bearing {bearing:.1f}°")
+            segment_mesh = trimesh.creation.cylinder(
                 radius=self.post_radius,
-                height=top_post_height,
-                sections=64
+                height=segment_height,
+                sections=segments
             )
-            # Translate to sit on Z=0 and offset to the side
-            top_post_mesh.apply_translation([x_offset, 0, top_post_height / 2])
+            segment_mesh.apply_translation([0, 0, segment_height / 2])
             
-            # Subtract boxes for second post signs
-            # Second post gets the FIRST num_signs_top locations, in reverse order (bottom to top)
-            print("  Subtracting boxes from second post...")
-            top_pin_meshes = []
-            for i in range(num_signs_top):
-                # Get bearing from beginning of list, working backwards
-                bearing_index = num_signs_top - 1 - i
-                bearing = bearings[bearing_index]
-                sign_bottom = sign_vertical_spacing + (i * sign_increment)
-                sign_center = sign_bottom + self.flat_height / 2
-                
-                print(f"    Box {i+1}: bearing {bearing:.1f}° (location #{bearing_index+1}), center height {sign_center:.1f}mm, post offset X={x_offset:.1f}")
-                
-                box_mesh = self._create_box_mesh_at_bearing(bearing, sign_center, x_offset, 0)
-                try:
-                    new_mesh = top_post_mesh.difference(box_mesh)
-                    if new_mesh is not None and len(new_mesh.faces) > 0:
-                        top_post_mesh = new_mesh
-                    else:
-                        print(f"      Warning: Boolean operation returned empty mesh")
-                except Exception as e:
-                    print(f"      Warning: Boolean operation failed: {e}")
-                
-                top_pin_meshes.append(
-                    self._create_index_pin_at_bearing(bearing, sign_center, x_offset, 0)
-                )
-            
-            # Add alignment socket to bottom of second post
-            print("  Adding alignment socket to second post...")
-            socket_mesh = self._create_alignment_socket(x_offset, 0)
+            box_mesh = self._create_box_mesh_at_bearing(bearing, segment_sign_center, 0, 0)
             try:
-                new_mesh = top_post_mesh.difference(socket_mesh)
+                new_mesh = segment_mesh.difference(box_mesh)
                 if new_mesh is not None and len(new_mesh.faces) > 0:
-                    top_post_mesh = new_mesh
+                    segment_mesh = new_mesh
                 else:
-                    print(f"      Warning: Socket boolean operation returned empty mesh")
+                    print(f"      Warning: Flat boolean returned empty mesh")
             except Exception as e:
-                print(f"      Warning: Socket boolean operation failed: {e}")
+                print(f"      Warning: Flat boolean failed: {e}")
             
-            if top_pin_meshes:
-                top_post_mesh = trimesh.util.concatenate([top_post_mesh, *top_pin_meshes])
-            all_meshes.append(top_post_mesh)
+            pin_mesh = self._create_index_pin_at_bearing(bearing, segment_sign_center, 0, 0)
+            segment_mesh = trimesh.util.concatenate([segment_mesh, pin_mesh])
+            
+            socket_mesh = self._create_alignment_socket(0, 0)
+            try:
+                new_mesh = segment_mesh.difference(socket_mesh)
+                if new_mesh is not None and len(new_mesh.faces) > 0:
+                    segment_mesh = new_mesh
+                else:
+                    print(f"      Warning: Socket boolean returned empty mesh")
+            except Exception as e:
+                print(f"      Warning: Socket boolean failed: {e}")
+            
+            peg_mesh = self._create_alignment_peg(segment_height)
+            segment_mesh = trimesh.util.concatenate([segment_mesh, peg_mesh])
+            
+            segment_path = f"{output_base}_segment_{i+1}.stl"
+            segment_mesh.export(segment_path)
+            print(f"      Saved: {segment_path}")
         
-        # Combine all meshes
-        print("  Combining meshes...")
-        combined_mesh = trimesh.util.concatenate(all_meshes)
+        # ===== TOPPER =====
+        print("  Creating post topper...")
+        topper_height = 10.0
+        topper_mesh = trimesh.creation.cylinder(
+            radius=self.post_radius,
+            height=topper_height,
+            sections=segments
+        )
+        topper_mesh.apply_translation([0, 0, topper_height / 2])
+        socket_mesh = self._create_alignment_socket(0, 0)
+        try:
+            new_mesh = topper_mesh.difference(socket_mesh)
+            if new_mesh is not None and len(new_mesh.faces) > 0:
+                topper_mesh = new_mesh
+            else:
+                print(f"    Warning: Topper socket boolean returned empty mesh")
+        except Exception as e:
+            print(f"    Warning: Topper socket boolean failed: {e}")
         
-        # Export to STL
-        combined_mesh.export(output_path)
-        print(f"  Saved: {output_path}")
+        topper_path = f"{output_base}_topper.stl"
+        topper_mesh.export(topper_path)
+        print(f"  Saved: {topper_path}")
     
     def _create_box_at_bearing(self, bearing: float, sign_height: float, 
                                post_x_offset: float, post_y_offset: float,
