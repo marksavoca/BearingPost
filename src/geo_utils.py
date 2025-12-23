@@ -5,11 +5,6 @@ Geographic utility functions for calculating bearings and distances.
 import math
 from typing import Tuple
 
-try:
-    from geopy.geocoders import Nominatim
-    GEOPY_AVAILABLE = True
-except ImportError:
-    GEOPY_AVAILABLE = False
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -95,15 +90,3 @@ def format_distance(distance_km: float, units: str = 'mi') -> str:
     else:  # both
         return f"{distance_km:,.0f} km ({distance_mi:,.0f} mi)"
 
-
-def geocode_place(place: str, user_agent: str = "direction_sign/1.0") -> Tuple[float, float]:
-    """
-    Geocode a place name using geopy + Nominatim.
-    """
-    if not GEOPY_AVAILABLE:
-        raise ImportError("geopy is required for geocoding; install with: pip install geopy")
-    geocoder = Nominatim(user_agent=user_agent)
-    location = geocoder.geocode(place, exactly_one=True, timeout=10)
-    if location is None:
-        raise ValueError(f"No geocoding results for: {place}")
-    return float(location.latitude), float(location.longitude)

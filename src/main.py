@@ -7,7 +7,7 @@ import argparse
 import json
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
-from geo_utils import haversine_distance, calculate_bearing, format_distance, geocode_place
+from geo_utils import haversine_distance, calculate_bearing, format_distance
 from stl_generator import DirectionSignGenerator
 import os
 
@@ -34,13 +34,8 @@ def load_config(path: str) -> Tuple[Location, List[Location], str, str]:
     home_cfg = config["home"]
     config_dirty = False
     if "latitude" not in home_cfg or "longitude" not in home_cfg:
-        home_query = home_cfg.get("location") or home_cfg["name"]
-        home_lat, home_lon = geocode_place(home_query, user_agent=user_agent)
-        home_cfg["latitude"] = home_lat
-        home_cfg["longitude"] = home_lon
-        config_dirty = True
-    else:
-        home_lat, home_lon = home_cfg["latitude"], home_cfg["longitude"]
+        raise ValueError("Home is missing latitude/longitude in config.")
+    home_lat, home_lon = home_cfg["latitude"], home_cfg["longitude"]
     home = Location(
         name=home_cfg["name"],
         latitude=home_lat,
@@ -53,13 +48,8 @@ def load_config(path: str) -> Tuple[Location, List[Location], str, str]:
     locations = []
     for entry in config.get("locations", []):
         if "latitude" not in entry or "longitude" not in entry:
-            query = entry.get("location") or entry["name"]
-            lat, lon = geocode_place(query, user_agent=user_agent)
-            entry["latitude"] = lat
-            entry["longitude"] = lon
-            config_dirty = True
-        else:
-            lat, lon = entry["latitude"], entry["longitude"]
+            raise ValueError("A location is missing latitude/longitude in config.")
+        lat, lon = entry["latitude"], entry["longitude"]
         locations.append(
             Location(
                 name=entry["name"],
@@ -71,11 +61,6 @@ def load_config(path: str) -> Tuple[Location, List[Location], str, str]:
                 text_color=entry.get("text_color", "white"),
             )
         )
-    if config_dirty:
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(config, handle, indent=2)
-            handle.write("\n")
-        print(f"Updated config with geocoded lat/long: {path}")
     return home, locations, units, user_agent
 
 def main():
