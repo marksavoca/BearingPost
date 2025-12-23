@@ -22,7 +22,8 @@ class Location:
     distance_km: float = None  # Optional: can be calculated or provided
     bearing: float = None  # Bearing in degrees from home (0-360)
     font: str = "Arial"  # Font for the sign text
-    color: str = "blue"  # Color for the sign
+    sign_color: str = "blue"  # Color for the sign
+    text_color: str = "white"  # Color for the sign text
 
 
 def load_config(path: str) -> Tuple[Location, List[Location], str]:
@@ -36,7 +37,8 @@ def load_config(path: str) -> Tuple[Location, List[Location], str]:
         longitude=home_cfg["longitude"],
         location=home_cfg.get("location", home_cfg["name"]),
         font=home_cfg.get("font", "Arial"),
-        color=home_cfg.get("color", "blue"),
+        sign_color=home_cfg.get("sign_color", "blue"),
+        text_color=home_cfg.get("text_color", "white"),
     )
     locations = []
     for entry in config.get("locations", []):
@@ -47,7 +49,8 @@ def load_config(path: str) -> Tuple[Location, List[Location], str]:
                 longitude=entry["longitude"],
                 location=entry.get("location", entry["name"]),
                 font=entry.get("font", "Arial"),
-                color=entry.get("color", "blue"),
+                sign_color=entry.get("sign_color", "blue"),
+                text_color=entry.get("text_color", "white"),
             )
         )
     return home, locations, units
@@ -78,13 +81,13 @@ def main():
         )
     
     # Display results
-    print(f"{'Location':<35} {'Distance':<20} {'Bearing':<15} {'Font':<10} {'Color':<10}")
+    print(f"{'Location':<35} {'Distance':<20} {'Bearing':<15} {'Font':<10} {'Sign':<10} {'Text':<10}")
     print("=" * 70)
     
     for loc in LOCATIONS:
         distance_str = format_distance(loc.distance_km, units=units)
         bearing_str = f"{loc.bearing:.1f}°"
-        print(f"{loc.name:<35} {distance_str:<20} {bearing_str:<15} {loc.font:<10} {loc.color:<10}")
+        print(f"{loc.name:<35} {distance_str:<20} {bearing_str:<15} {loc.font:<10} {loc.sign_color:<10} {loc.text_color:<10}")
     
     print("\n" + "=" * 70)
     print("\nGenerating STL files...")
