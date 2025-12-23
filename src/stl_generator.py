@@ -142,6 +142,13 @@ class DirectionSignGenerator:
         )
         target_mesh.apply_transform(rotation_matrix)
 
+    def _center_mesh_xy(self, target_mesh: trimesh.Trimesh) -> None:
+        """Center a mesh in the XY plane, preserving Z."""
+        bounds = target_mesh.bounds
+        center_x = (bounds[0][0] + bounds[1][0]) / 2
+        center_y = (bounds[0][1] + bounds[1][1]) / 2
+        target_mesh.apply_translation([-center_x, -center_y, 0])
+
     def _create_index_pin_at_bearing(self, bearing: float, sign_height: float,
                                      post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:
         """Create an indexing pin on the flat spot at a specific bearing."""
@@ -290,7 +297,10 @@ class DirectionSignGenerator:
         base_post_mesh.apply_translation([0, 0, base_post_height / 2])
         
         peg_mesh = self._create_alignment_peg(base_post_height)
+        compass_meshes = self._create_compass_decorations()
         base_meshes = [base_mesh, arrow_mesh, base_post_mesh, peg_mesh]
+        if compass_meshes:
+            base_meshes.extend(compass_meshes)
         if coords_meshes:
             base_meshes.extend(coords_meshes)
         base_segment = trimesh.util.concatenate(base_meshes)
@@ -318,7 +328,8 @@ class DirectionSignGenerator:
             )
             segment_mesh.apply_translation([0, 0, segment_height / 2])
             if not is_spacer and bearing is not None:
-                box_mesh = self._create_box_mesh_at_bearing(bearing, segment_sign_center, 0, 0)
+                adjusted_bearing = (bearing + 90.0) % 360.0
+                box_mesh = self._create_box_mesh_at_bearing(adjusted_bearing, segment_sign_center, 0, 0)
                 try:
                     new_mesh = segment_mesh.difference(box_mesh)
                     if new_mesh is not None and len(new_mesh.faces) > 0:
@@ -330,11 +341,11 @@ class DirectionSignGenerator:
                 
                 if segment_id is not None:
                     id_pin_mesh = self._create_id_pins_at_bearing(
-                        bearing, segment_sign_center, 0, 0, segment_id
+                        adjusted_bearing, segment_sign_center, 0, 0, segment_id
                     )
                     segment_mesh = trimesh.util.concatenate([segment_mesh, id_pin_mesh])
                 else:
-                    center_pin_mesh = self._create_index_pin_at_bearing(bearing, segment_sign_center, 0, 0)
+                    center_pin_mesh = self._create_index_pin_at_bearing(adjusted_bearing, segment_sign_center, 0, 0)
                     segment_mesh = trimesh.util.concatenate([segment_mesh, center_pin_mesh])
             
             socket_mesh = self._create_alignment_socket(0, 0)
@@ -510,46 +521,110 @@ class DirectionSignGenerator:
         Returns:
             trimesh.Trimesh: North indicator mesh
         """
-        letter_thickness = 2.0  # Height above base
-        letter_height = min(self.arrow_length * 0.6, self.base_radius * 0.25)
-        letter_width = letter_height * 0.6
-        stroke = max(letter_width * 0.22, 1.0)
+        if FREETYPE_AVAILABLE:
+            font_size = min(self.arrow_length * 0.9, self.base_radius * 0.3)
+            z_center = self.base_height + self.text_height / 2
+            letter_mesh = self._create_text_mesh_vector("N", font_size, (0, 0, z_center))
+            self._center_mesh_xy(letter_mesh)
+            bounds = letter_mesh.bounds
+            letter_height = bounds[1][1] - bounds[0][1]
+            letter_width = bounds[1][0] - bounds[0][0]
+        else:
+            letter_thickness = 2.0  # Height above base
+            letter_height = min(self.arrow_length * 0.6, self.base_radius * 0.25)
+            letter_width = letter_height * 0.6
+            stroke = max(letter_width * 0.22, 1.0)
+            
+            # Build a blocky "N" in the XY plane, then extrude in Z.
+            z_center = self.base_height + letter_thickness / 2
+            y_center = letter_height / 2
+            left_bar = trimesh.creation.box(extents=[stroke, letter_height, letter_thickness])
+            left_bar.apply_translation([-letter_width / 2 + stroke / 2, y_center, z_center])
+            
+            right_bar = trimesh.creation.box(extents=[stroke, letter_height, letter_thickness])
+            right_bar.apply_translation([letter_width / 2 - stroke / 2, y_center, z_center])
+            
+            diag_length = math.hypot(letter_height - stroke, letter_width - stroke)
+            diag_bar = trimesh.creation.box(extents=[stroke, diag_length, letter_thickness])
+            diag_angle = math.atan2(letter_width - stroke, letter_height - stroke)
+            diag_bar.apply_transform(trimesh.transformations.rotation_matrix(diag_angle, [0, 0, 1]))
+            diag_bar.apply_translation([0, y_center, z_center])
+            
+            letter_mesh = trimesh.util.concatenate([left_bar, right_bar, diag_bar])
+            
+            # Rotate another 90° so the letter orientation matches the coordinate text.
+            self._rotate_mesh_z(letter_mesh, 90, (0, 0, z_center))
         
-        # Build a blocky "N" in the XY plane, then extrude in Z.
-        z_center = self.base_height + letter_thickness / 2
-        y_center = letter_height / 2
-        left_bar = trimesh.creation.box(extents=[stroke, letter_height, letter_thickness])
-        left_bar.apply_translation([-letter_width / 2 + stroke / 2, y_center, z_center])
-        
-        right_bar = trimesh.creation.box(extents=[stroke, letter_height, letter_thickness])
-        right_bar.apply_translation([letter_width / 2 - stroke / 2, y_center, z_center])
-        
-        diag_length = math.hypot(letter_height - stroke, letter_width - stroke)
-        diag_bar = trimesh.creation.box(extents=[stroke, diag_length, letter_thickness])
-        diag_angle = math.atan2(letter_width - stroke, letter_height - stroke)
-        diag_bar.apply_transform(trimesh.transformations.rotation_matrix(diag_angle, [0, 0, 1]))
-        diag_bar.apply_translation([0, y_center, z_center])
-        
-        letter_mesh = trimesh.util.concatenate([left_bar, right_bar, diag_bar])
-        
-        # Rotate another 90° so the letter orientation matches the coordinate text.
-        self._rotate_mesh_z(letter_mesh, 90, (0, 0, z_center))
-        
-        # Position on the base top, nudged toward west (-X); Y offset is kept
-        # at the midline to preserve current visual placement.
-        base_y =  0
+        # Position on the base top at north (+Y).
+        base_y = self.base_radius * 0.7
         max_y = self.base_radius * 0.85
         if base_y + letter_height > max_y:
             base_y = max_y - letter_height
         if base_y < 0:
             base_y = 0
-        base_x = -self.base_radius * 0.5
-        min_x = -self.base_radius * 0.85
-        if base_x - (letter_width / 2) < min_x:
-            base_x = min_x + (letter_width / 2)
+        base_x = 0.0
         letter_mesh.apply_translation([base_x, base_y, 0])
         
         return letter_mesh
+
+    def _create_compass_decorations(self) -> List[trimesh.Trimesh]:
+        """Create E/S/W letters and compass ticks/ring."""
+        meshes = []
+        # Letters
+        if FREETYPE_AVAILABLE:
+            z_center = self.base_height + self.text_height / 2
+            north_font = min(self.arrow_length * 0.9, self.base_radius * 0.3)
+            other_font = north_font * 0.85
+            letter_radius = self.base_radius * 0.7
+            for letter, bearing_deg, size in [
+                ("E", 90, other_font),
+                ("S", 180, other_font),
+                ("W", 270, other_font),
+            ]:
+                angle = math.radians(bearing_deg)
+                x = math.sin(angle) * letter_radius
+                y = math.cos(angle) * letter_radius
+                letter_mesh = self._create_text_mesh_vector(letter, size, (0, 0, z_center))
+                self._center_mesh_xy(letter_mesh)
+                letter_mesh.apply_translation([x, y, 0])
+                meshes.append(letter_mesh)
+        
+        # Ring
+        ring_height = 0.6
+        outer_radius = self.base_radius * 0.9
+        inner_radius = self.base_radius * 0.85
+        try:
+            outer = trimesh.creation.cylinder(radius=outer_radius, height=ring_height, sections=96)
+            inner = trimesh.creation.cylinder(radius=inner_radius, height=ring_height, sections=96)
+            outer.apply_translation([0, 0, self.base_height + ring_height / 2])
+            inner.apply_translation([0, 0, self.base_height + ring_height / 2])
+            ring = outer.difference(inner)
+            if ring is not None and len(ring.faces) > 0:
+                meshes.append(ring)
+        except Exception:
+            pass
+        
+        # Ticks
+        tick_height = 0.6
+        tick_width = 0.8
+        tick_length_small = 2.0
+        tick_length_med = 3.0
+        tick_length_large = 4.0
+        tick_radius = self.base_radius * 0.92
+        for deg in range(0, 360, 10):
+            angle = math.radians(-deg)
+            if deg % 90 == 0:
+                tick_length = tick_length_large
+            elif deg % 45 == 0:
+                tick_length = tick_length_med
+            else:
+                tick_length = tick_length_small
+            tick = trimesh.creation.box(extents=[tick_width, tick_length, tick_height])
+            tick.apply_translation([0, tick_radius - tick_length / 2, self.base_height + tick_height / 2])
+            tick.apply_transform(trimesh.transformations.rotation_matrix(angle, [0, 0, 1]))
+            meshes.append(tick)
+        
+        return meshes
     
     def _create_coordinates_text(self, latitude: float, longitude: float) -> List[trimesh.Trimesh]:
         """
@@ -627,8 +702,8 @@ class DirectionSignGenerator:
         key_box = trimesh.creation.box(
             extents=[key_width, key_depth * 2, peg_height]
         )
-        # Position key at +X side of peg (0° reference for alignment keying)
-        key_box.apply_translation([peg_radius + key_depth, 0, post_height + peg_height / 2])
+        # Position key at south side (-Y) for alignment reference
+        key_box.apply_translation([0, -(peg_radius + key_depth), post_height + peg_height / 2])
         
         peg_mesh = trimesh.util.concatenate([peg, key_box])
         
@@ -682,10 +757,10 @@ class DirectionSignGenerator:
         key_slot = trimesh.creation.box(
             extents=[key_width, key_depth * 2, socket_depth]
         )
-        # Position slot at +X side of socket (0° reference for alignment keying)
+        # Position slot at south side (-Y) to match the peg key orientation
         key_slot.apply_translation([
-            post_x_offset + peg_radius + key_depth,
-            post_y_offset,
+            post_x_offset,
+            post_y_offset - (peg_radius + key_depth),
             socket_depth / 2
         ])
         
