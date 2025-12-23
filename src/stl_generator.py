@@ -85,7 +85,7 @@ class DirectionSignGenerator:
         self.max_font_size = max_font_size
         self.text_height = text_height
     
-    def generate_post(self, bearings: List[float], output_path: str):
+    def generate_post(self, bearings: List[float], output_path: str, home_lat: float = None, home_lon: float = None):
         """
         Generate two post sections with flat indents at specified bearings.
         Creates a two-piece design to fit within 210mm print height.
@@ -96,6 +96,8 @@ class DirectionSignGenerator:
         Args:
             bearings: List of bearings (in degrees) where signs will attach, ordered top to bottom
             output_path: Path to save the STL file
+            home_lat: Home latitude to emboss on base (optional)
+            home_lon: Home longitude to emboss on base (optional)
         """
         print(f"Generating 2-piece post with {len(bearings)} flat indents...")
         
@@ -155,6 +157,11 @@ class DirectionSignGenerator:
         # Create north arrow on top of base
         arrow_mesh = self._create_north_arrow()
         
+        # Create coordinates text on base if provided
+        coords_meshes = []
+        if home_lat is not None and home_lon is not None:
+            coords_meshes = self._create_coordinates_text(home_lat, home_lon)
+        
         # Create post cylinder
         bottom_post_mesh = trimesh.creation.cylinder(
             radius=self.post_radius,
@@ -185,14 +192,18 @@ class DirectionSignGenerator:
             except Exception as e:
                 print(f"      Warning: Boolean operation failed: {e}")
         
-        # Combine base, arrow, and post
-        print("  Combining base, arrow, and post...")
+        # Combine base, arrow, coordinates text, and post
+        print("  Combining base, arrow, coordinates, and post...")
         
         # Add alignment peg on top of first post
         print("  Adding alignment peg to first post...")
         peg_mesh = self._create_alignment_peg(bottom_post_height)
         
-        combined_first_post = trimesh.util.concatenate([base_mesh, arrow_mesh, bottom_post_mesh, peg_mesh])
+        meshes_to_combine = [base_mesh, arrow_mesh, bottom_post_mesh, peg_mesh]
+        if coords_meshes:
+            meshes_to_combine.extend(coords_meshes)
+        
+        combined_first_post = trimesh.util.concatenate(meshes_to_combine)
         all_meshes.append(combined_first_post)
         
         # ===== CREATE SECOND POST (SHORTER, offset to the side) =====
@@ -408,6 +419,58 @@ class DirectionSignGenerator:
         
         # Combine shaft and head
         return trimesh.util.concatenate([shaft_box, head_mesh])
+    
+    def _create_coordinates_text(self, latitude: float, longitude: float) -> List[trimesh.Trimesh]:
+        """
+        Create embossed coordinate text on the base.
+        Truncates to 4 decimal places for readability.
+        
+        Args:
+            latitude: Latitude coordinate
+            longitude: Longitude coordinate
+            
+        Returns:
+            List[trimesh.Trimesh]: List of text meshes for coordinates
+        """
+        if not FREETYPE_AVAILABLE:
+            return []
+        
+        try:
+            print(f"  Adding coordinates text to base (south side)...")
+            # Format coordinates to 4 decimal places
+            lat_text = f"{latitude:.4f}"
+            lon_text = f"{longitude:.4f}"
+            # Font size for coordinates (small, readable)
+            font_size = 4.5  # 4.5mm font (larger for readability)
+            text_height = 0.5  # 0.5mm emboss height
+            base_z = self.base_height + text_height
+            # Both texts on south side (-Y), centered horizontally
+            x_pos = 0  # Centered on X axis
+            y_pos = -self.base_radius * 0.7  # South side (negative Y)
+            gap = 2.0  # mm between lat and long
+            lat_width = len(lat_text) * font_size * 0.6
+            lon_width = len(lon_text) * font_size * 0.6
+            total_width = lat_width + gap + lon_width
+            start_x = -total_width / 2
+            lat_x = start_x
+            lon_x = start_x + lat_width + gap
+            lat_mesh = self._create_text_mesh_vector(lat_text, font_size, (lat_x, y_pos, base_z))
+            lon_mesh = self._create_text_mesh_vector(lon_text, font_size, (lon_x, y_pos, base_z))
+
+            # Ensure both meshes are facing the -Y direction (south)
+            # If the text appears on the east (+X), rotate -90° around Z axis to move to -Y
+            # Check if the text is aligned with X axis (east), and rotate if needed
+            # We'll always rotate -90° to guarantee south placement
+            rot_matrix = trimesh.transformations.rotation_matrix(
+                math.radians(-90), [0, 0, 1], [0, 0, base_z]
+            )
+            lat_mesh.apply_transform(rot_matrix)
+            lon_mesh.apply_transform(rot_matrix)
+            print(f"  Coordinates embossed: {lat_text}, {lon_text}")
+            return [lat_mesh, lon_mesh]
+        except Exception as e:
+            print(f"  Warning: Could not create coordinates text: {e}")
+            return []
     
     def _create_alignment_peg(self, post_height: float) -> trimesh.Trimesh:
         """

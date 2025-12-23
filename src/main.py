@@ -90,7 +90,7 @@ def main():
     print(f"\nOriginal bearings: {[f'{loc.bearing:.1f}' for loc in LOCATIONS]}")
     print(f"Adjusted bearings: {[f'{b:.1f}' for b in post_bearings]}")
     post_path = os.path.join(output_dir, "post.stl")
-    generator.generate_post(post_bearings, post_path)
+    generator.generate_post(post_bearings, post_path, HOME.latitude, HOME.longitude)
     
     # Generate individual sign plates for each location
     print("\nGenerating sign plates...")
