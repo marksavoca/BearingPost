@@ -10,12 +10,6 @@ import trimesh
 
 # Try to import optional text rendering libraries
 try:
-    from PIL import Image, ImageDraw, ImageFont
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-
-try:
     import freetype
     from shapely.geometry import Polygon, MultiPolygon
     from shapely.ops import unary_union
@@ -44,7 +38,12 @@ class DirectionSignGenerator:
                  max_sign_length: float = 200.0,
                  min_font_size: float = 10.0,
                  max_font_size: float = 20.0,
-                 text_height: float = 1.0):
+                 text_height: float = 1.0,
+                 base_text_font_size: float = 4.5,
+                 base_text_height: float = 0.5,
+                 base_text_gap: float = 2.0,
+                 base_text_radius_factor: float = 0.7,
+                 base_text_rotation_deg: float = 90.0):
         """
         Initialize the sign generator with dimensions (all in mm).
         
@@ -66,6 +65,11 @@ class DirectionSignGenerator:
             min_font_size: Minimum font size for text
             max_font_size: Maximum font size for text
             text_height: Height of embossed text (mm)
+            base_text_font_size: Font size for base coordinates text (mm)
+            base_text_height: Emboss height for base coordinates (mm)
+            base_text_gap: Gap between latitude and longitude text (mm)
+            base_text_radius_factor: Base radius factor for south-side text placement
+            base_text_rotation_deg: Z rotation for base text orientation
         """
         self.post_height = post_height
         self.post_radius = post_radius
@@ -84,6 +88,19 @@ class DirectionSignGenerator:
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
         self.text_height = text_height
+        self.base_text_font_size = base_text_font_size
+        self.base_text_height = base_text_height
+        self.base_text_gap = base_text_gap
+        self.base_text_radius_factor = base_text_radius_factor
+        self.base_text_rotation_deg = base_text_rotation_deg
+
+    def _rotate_mesh_z(self, target_mesh: trimesh.Trimesh, degrees: float,
+                       center: Tuple[float, float, float]) -> None:
+        """Rotate a mesh around the Z axis in-place."""
+        rotation_matrix = trimesh.transformations.rotation_matrix(
+            math.radians(degrees), [0, 0, 1], center
+        )
+        target_mesh.apply_transform(rotation_matrix)
     
     def generate_post(self, bearings: List[float], output_path: str, home_lat: float = None, home_lon: float = None):
         """
@@ -107,13 +124,15 @@ class DirectionSignGenerator:
         segments = 64
         post_separation = 150.0  # Distance between the two posts when laid side by side
         max_post_height = 200.0  # Maximum height for each post section
+        sign_vertical_spacing = 8.0
+        base_sign_offset = 40.0
+        top_padding = 8.0
         
         # Calculate sign distribution and heights
         # Account for base height in the first post
         base_height_offset = self.base_height
-        bottom_start_height = base_height_offset + 40.0  # Start first sign 40mm above base
-        sign_increment = self.flat_height + 8.0  # flat_height (28mm) + spacing (8mm)
-        top_padding = 8.0  # Spacing above the last sign
+        bottom_start_height = base_height_offset + base_sign_offset
+        sign_increment = self.flat_height + sign_vertical_spacing
         
         # Determine how many signs fit on bottom post (taller post)
         num_signs_bottom = 0
@@ -132,7 +151,7 @@ class DirectionSignGenerator:
         if num_signs_top > 0:
             # First sign BOTTOM should be at 8mm above Z=0
             # Since we position by center, center = bottom + flat_height/2
-            top_start_height = 8.0 + self.flat_height / 2  # 8mm (spacing) + 14mm (half flat) = 22mm center
+            top_start_height = sign_vertical_spacing + self.flat_height / 2
             # Post height goes from 0 to (last sign center + half flat height + padding)
             top_post_height = top_start_height + (num_signs_top - 1) * sign_increment + self.flat_height / 2 + top_padding
         else:
@@ -226,7 +245,7 @@ class DirectionSignGenerator:
                 # Get bearing from beginning of list, working backwards
                 bearing_index = num_signs_top - 1 - i
                 bearing = bearings[bearing_index]
-                sign_bottom = 8.0 + (i * sign_increment)
+                sign_bottom = sign_vertical_spacing + (i * sign_increment)
                 sign_center = sign_bottom + self.flat_height / 2
                 
                 print(f"    Box {i+1}: bearing {bearing:.1f}° (location #{bearing_index+1}), center height {sign_center:.1f}mm, post offset X={x_offset:.1f}")
@@ -399,9 +418,7 @@ class DirectionSignGenerator:
         letter_mesh = trimesh.util.concatenate([left_bar, right_bar, diag_bar])
         
         # Rotate another 90° so the letter orientation matches the coordinate text.
-        letter_mesh.apply_transform(trimesh.transformations.rotation_matrix(
-            math.radians(90), [0, 0, 1], [0, 0, z_center]
-        ))
+        self._rotate_mesh_z(letter_mesh, 90, (0, 0, z_center))
         
         # Position on the base top, nudged toward west (-X); Y offset is kept
         # at the midline to preserve current visual placement.
@@ -440,12 +457,12 @@ class DirectionSignGenerator:
             lat_text = f"{latitude:.4f}"
             lon_text = f"{longitude:.4f}"
             # Font size for coordinates (small, readable)
-            font_size = 4.5  # 4.5mm font (larger for readability)
-            text_height = 0.5  # 0.5mm emboss height
+            font_size = self.base_text_font_size
+            text_height = self.base_text_height
             base_z = self.base_height + text_height
             # Both texts on south side (-Y), centered horizontally
-            y_pos = -self.base_radius * 0.7  # South side (negative Y)
-            gap = 2.0  # mm between lat and long
+            y_pos = -self.base_radius * self.base_text_radius_factor
+            gap = self.base_text_gap
             lat_width = len(lat_text) * font_size * 0.6
             lon_width = len(lon_text) * font_size * 0.6
             total_width = lat_width + gap + lon_width
@@ -456,11 +473,8 @@ class DirectionSignGenerator:
             lon_mesh = self._create_text_mesh_vector(lon_text, font_size, (lon_x, y_pos, base_z))
 
             # Rotate both texts another 90° to align with the intended facing direction.
-            rot_matrix = trimesh.transformations.rotation_matrix(
-                math.radians(90), [0, 0, 1], [0, 0, base_z]
-            )
-            lat_mesh.apply_transform(rot_matrix)
-            lon_mesh.apply_transform(rot_matrix)
+            self._rotate_mesh_z(lat_mesh, self.base_text_rotation_deg, (0, 0, base_z))
+            self._rotate_mesh_z(lon_mesh, self.base_text_rotation_deg, (0, 0, base_z))
 
             print(f"  Coordinates embossed: {lat_text}, {lon_text}")
             return [lat_mesh, lon_mesh]
@@ -493,11 +507,11 @@ class DirectionSignGenerator:
         )
         peg.apply_translation([0, 0, post_height + peg_height / 2])
         
-        # Create alignment key (rectangular protrusion at 0° / north)
+        # Create alignment key (rectangular protrusion at 0° / +X reference)
         key_box = trimesh.creation.box(
             extents=[key_width, key_depth * 2, peg_height]
         )
-        # Position key at north side of peg (0° bearing = +X direction)
+        # Position key at +X side of peg (0° reference for alignment keying)
         key_box.apply_translation([peg_radius + key_depth, 0, post_height + peg_height / 2])
         
         # Combine peg and key
@@ -530,11 +544,11 @@ class DirectionSignGenerator:
         )
         socket.apply_translation([post_x_offset, post_y_offset, socket_depth / 2])
         
-        # Create alignment key slot (rectangular cutout at 0° / north)
+        # Create alignment key slot (rectangular cutout at 0° / +X reference)
         key_slot = trimesh.creation.box(
             extents=[key_width, key_depth * 2, socket_depth]
         )
-        # Position slot at north side of socket (0° bearing = +X direction)
+        # Position slot at +X side of socket (0° reference for alignment keying)
         key_slot.apply_translation([
             post_x_offset + peg_radius + key_depth,
             post_y_offset,
@@ -566,7 +580,7 @@ class DirectionSignGenerator:
         # Create box centered at origin
         box = trimesh.creation.box(extents=[box_width, box_depth, box_height])
         
-        # Position the box at bearing 0 (North, +Y axis)
+        # Position the box at bearing 0 (north for bearings, +Y axis)
         # Box should be tangent to post surface (not cutting through center)
         distance_from_center = self.post_radius - self.flat_depth + box_depth / 2
         
