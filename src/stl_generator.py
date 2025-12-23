@@ -371,7 +371,7 @@ class DirectionSignGenerator:
     def _create_north_arrow(self) -> trimesh.Trimesh:
         """
         Create a north indicator mesh ("N") to sit on top of the base.
-        The letter is oriented toward +X to indicate north (bearing 0°).
+        The letter is oriented toward +Y to indicate north (bearing 0°).
         
         Returns:
             trimesh.Trimesh: North indicator mesh
@@ -383,28 +383,39 @@ class DirectionSignGenerator:
         
         # Build a blocky "N" in the XY plane, then extrude in Z.
         z_center = self.base_height + letter_thickness / 2
-        left_bar = trimesh.creation.box(extents=[letter_height, stroke, letter_thickness])
-        left_bar.apply_translation([letter_height / 2, -letter_width / 2 + stroke / 2, z_center])
+        y_center = letter_height / 2
+        left_bar = trimesh.creation.box(extents=[stroke, letter_height, letter_thickness])
+        left_bar.apply_translation([-letter_width / 2 + stroke / 2, y_center, z_center])
         
-        right_bar = trimesh.creation.box(extents=[letter_height, stroke, letter_thickness])
-        right_bar.apply_translation([letter_height / 2, letter_width / 2 - stroke / 2, z_center])
+        right_bar = trimesh.creation.box(extents=[stroke, letter_height, letter_thickness])
+        right_bar.apply_translation([letter_width / 2 - stroke / 2, y_center, z_center])
         
         diag_length = math.hypot(letter_height - stroke, letter_width - stroke)
-        diag_bar = trimesh.creation.box(extents=[diag_length, stroke, letter_thickness])
+        diag_bar = trimesh.creation.box(extents=[stroke, diag_length, letter_thickness])
         diag_angle = math.atan2(letter_width - stroke, letter_height - stroke)
         diag_bar.apply_transform(trimesh.transformations.rotation_matrix(diag_angle, [0, 0, 1]))
-        diag_bar.apply_translation([letter_height / 2, 0, z_center])
+        diag_bar.apply_translation([0, y_center, z_center])
         
         letter_mesh = trimesh.util.concatenate([left_bar, right_bar, diag_bar])
         
-        # Position on the north side of the base (+X direction).
-        base_x = self.base_radius * 0.6
-        max_x = self.base_radius * 0.85
-        if base_x + letter_height > max_x:
-            base_x = max_x - letter_height
-        if base_x < 0:
-            base_x = 0
-        letter_mesh.apply_translation([base_x, 0, 0])
+        # Rotate another 90° so the letter orientation matches the coordinate text.
+        letter_mesh.apply_transform(trimesh.transformations.rotation_matrix(
+            math.radians(90), [0, 0, 1], [0, 0, z_center]
+        ))
+        
+        # Position on the north side of the base (+Y direction),
+        # nudged toward the west (-X) per the top-view orientation.
+        base_y =  0
+        max_y = self.base_radius * 0.85
+        if base_y + letter_height > max_y:
+            base_y = max_y - letter_height
+        if base_y < 0:
+            base_y = 0
+        base_x = -self.base_radius * 0.5
+        min_x = -self.base_radius * 0.85
+        if base_x - (letter_width / 2) < min_x:
+            base_x = min_x + (letter_width / 2)
+        letter_mesh.apply_translation([base_x, base_y, 0])
         
         return letter_mesh
     
@@ -445,15 +456,13 @@ class DirectionSignGenerator:
             lat_mesh = self._create_text_mesh_vector(lat_text, font_size, (lat_x, y_pos, base_z))
             lon_mesh = self._create_text_mesh_vector(lon_text, font_size, (lon_x, y_pos, base_z))
 
-            # Ensure both meshes are facing the -Y direction (south)
-            # If the text appears on the east (+X), rotate -90° around Z axis to move to -Y
-            # Check if the text is aligned with X axis (east), and rotate if needed
-            # We'll always rotate -90° to guarantee south placement
+            # Rotate both texts another 90° to align with the intended facing direction.
             rot_matrix = trimesh.transformations.rotation_matrix(
-                math.radians(-90), [0, 0, 1], [0, 0, base_z]
+                math.radians(90), [0, 0, 1], [0, 0, base_z]
             )
             lat_mesh.apply_transform(rot_matrix)
             lon_mesh.apply_transform(rot_matrix)
+
             print(f"  Coordinates embossed: {lat_text}, {lon_text}")
             return [lat_mesh, lon_mesh]
         except Exception as e:
