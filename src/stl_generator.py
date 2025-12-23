@@ -242,7 +242,7 @@ class DirectionSignGenerator:
             return " ".join(parts[:-1]), parts[-1]
         return distance_text.strip(), ""
     
-    def generate_post(self, bearings: List[float], output_path: str, home_lat: float = None, home_lon: float = None):
+    def generate_post(self, bearings: List, output_path: str, home_lat: float = None, home_lon: float = None):
         """
         Generate a base segment plus one post segment per sign, and a topper cap.
         Each sign segment has a single flat indent centered with half-gap above/below.
@@ -255,7 +255,7 @@ class DirectionSignGenerator:
             home_lat: Home latitude to emboss on base (optional)
             home_lon: Home longitude to emboss on base (optional)
         """
-        print(f"Generating segmented post with {len(bearings)} sign segments...")
+        print(f"Generating segmented post with {len(bearings)} segments...")
         
         # Configuration
         segments = 64
@@ -300,28 +300,41 @@ class DirectionSignGenerator:
         
         # ===== SIGN SEGMENTS =====
         print("  Creating sign segments...")
-        for i, bearing in enumerate(bearings):
-            segment_id = i + 1
-            print(f"    Segment {segment_id}: bearing {bearing:.1f}° (ID {segment_id})")
+        for i, entry in enumerate(bearings):
+            if isinstance(entry, dict):
+                bearing = entry.get("bearing")
+                segment_id = entry.get("segment_id")
+                is_spacer = entry.get("spacer", False)
+            else:
+                bearing = entry
+                segment_id = i + 1
+                is_spacer = False
+            label = f"{segment_id}" if segment_id is not None else "spacer"
+            print(f"    Segment {i+1}: bearing {bearing} (ID {label})")
             segment_mesh = trimesh.creation.cylinder(
                 radius=self.post_radius,
                 height=segment_height,
                 sections=segments
             )
             segment_mesh.apply_translation([0, 0, segment_height / 2])
-            
-            box_mesh = self._create_box_mesh_at_bearing(bearing, segment_sign_center, 0, 0)
-            try:
-                new_mesh = segment_mesh.difference(box_mesh)
-                if new_mesh is not None and len(new_mesh.faces) > 0:
-                    segment_mesh = new_mesh
-                else:
-                    print(f"      Warning: Flat boolean returned empty mesh")
-            except Exception as e:
-                print(f"      Warning: Flat boolean failed: {e}")
-            
-            id_pin_mesh = self._create_id_pins_at_bearing(bearing, segment_sign_center, 0, 0, segment_id)
-            segment_mesh = trimesh.util.concatenate([segment_mesh, id_pin_mesh])
+            if not is_spacer and bearing is not None:
+                box_mesh = self._create_box_mesh_at_bearing(bearing, segment_sign_center, 0, 0)
+                try:
+                    new_mesh = segment_mesh.difference(box_mesh)
+                    if new_mesh is not None and len(new_mesh.faces) > 0:
+                        segment_mesh = new_mesh
+                    else:
+                        print(f"      Warning: Flat boolean returned empty mesh")
+                except Exception as e:
+                    print(f"      Warning: Flat boolean failed: {e}")
+                
+                center_pin_mesh = self._create_index_pin_at_bearing(bearing, segment_sign_center, 0, 0)
+                segment_mesh = trimesh.util.concatenate([segment_mesh, center_pin_mesh])
+                if segment_id is not None:
+                    id_pin_mesh = self._create_id_pins_at_bearing(
+                        bearing, segment_sign_center, 0, 0, segment_id
+                    )
+                    segment_mesh = trimesh.util.concatenate([segment_mesh, id_pin_mesh])
             
             socket_mesh = self._create_alignment_socket(0, 0)
             try:
@@ -897,7 +910,7 @@ class DirectionSignGenerator:
         return result
     
     def generate_sign(self, text: str, distance: str, output_path: str, bearing: float = 0.0,
-                      segment_id: int | None = None):
+                      segment_id: int | None = None, arrowed: bool = True):
         """
         Generate a directional sign plate with text.
         Creates a pointed sign (arrow end) with text embossed on it.
@@ -911,7 +924,7 @@ class DirectionSignGenerator:
             bearing: Bearing angle in degrees (0-360), used to determine sign orientation
         """
         # Determine if sign should point left (bearing > 180°)
-        point_left = bearing > 180.0
+        point_left = bearing > 180.0 if arrowed else False
         direction_note = " (pointing left)" if point_left else " (pointing right)"
         print(f"Generating sign for '{text}'{direction_note}...")
         
@@ -919,11 +932,12 @@ class DirectionSignGenerator:
         sign_height = self.flat_height - (2 * self.sign_clearance)
         
         # Create the basic sign shape parameters
-        point_length = sign_height * 0.5  # Point extends half the sign height
+        point_length = sign_height * 0.5 if arrowed else 0.0
         
         # Use maximum font size for main text (adjusted later to fit distance text)
         font_size = min(self.max_font_size, sign_height * 0.8)
         distance_value, distance_units = self._split_distance_text(distance)
+        has_distance = bool(distance_value)
         distance_font_size = min(self.max_font_size * 0.5, sign_height * 0.38)
         distance_font_size = min(distance_font_size, font_size * 0.65)
         min_distance_font_size = 5.0
@@ -942,7 +956,7 @@ class DirectionSignGenerator:
             units_width = len(distance_units) * units_font_size * distance_width_factor
             return max(value_width, units_width) + distance_width_margin
 
-        distance_width = compute_distance_width()
+        distance_width = compute_distance_width() if has_distance else 0.0
         
         # Minimum readable size
         min_main_font = 12.0  # Main text must be at least 12mm
@@ -952,13 +966,14 @@ class DirectionSignGenerator:
         tip_padding = 3.0
         base_text_gap = 16.0
         text_gap = max(10.0, base_text_gap - max(0, main_text_len - 6) * 1.2)
+        effective_gap = text_gap if has_distance else 0.0
         
         # Try to fit text at max sign length
         sign_length = self.max_sign_length
         body_length = sign_length - point_length
 
         def compute_required_body_length() -> float:
-            return attach_padding + main_text_width + text_gap + distance_width + tip_padding
+            return attach_padding + main_text_width + effective_gap + distance_width + tip_padding
 
         required_body_length = compute_required_body_length()
         print(
@@ -984,7 +999,7 @@ class DirectionSignGenerator:
                 distance_font_size = min(distance_font_size, font_size * 0.65)
                 units_font_size = max(min_distance_font_size, distance_font_size * 0.85)
                 main_text_width = main_text_len * font_size * name_width_factor
-                distance_width = compute_distance_width()
+                distance_width = compute_distance_width() if has_distance else 0.0
                 required_body_length = compute_required_body_length()
             print(
                 f"  Layout after sizing: name={main_text_width:.1f}mm, "
@@ -999,7 +1014,7 @@ class DirectionSignGenerator:
         # Final calculations
         distance_font_size = min(distance_font_size, font_size * 0.65)
         units_font_size = max(min_distance_font_size, distance_font_size * 0.85)
-        distance_width = compute_distance_width()
+        distance_width = compute_distance_width() if has_distance else 0.0
         main_text_width = main_text_len * font_size * name_width_factor
         
         # Clamp font size
@@ -1028,37 +1043,49 @@ class DirectionSignGenerator:
         
         vertices = []
         
-        # Build right-pointing geometry (square end at X=0, pointed end at X=sign_length)
-        vertices.append([0, 0, 0])
-        vertices.append([0, sign_height, 0])
-        vertices.append([0, sign_height, self.sign_thickness])
-        vertices.append([0, 0, self.sign_thickness])
-        
-        body_length = sign_length - point_length
-        vertices.append([body_length, 0, 0])
-        vertices.append([body_length, sign_height, 0])
-        vertices.append([body_length, sign_height, self.sign_thickness])
-        vertices.append([body_length, 0, self.sign_thickness])
-        
-        tip_y = sign_height / 2
-        vertices.append([sign_length, tip_y, 0])
-        vertices.append([sign_length, tip_y, self.sign_thickness])
-        
-        # Define faces for right-pointing geometry
-        faces = []
-        faces.extend([[0, 2, 1], [0, 3, 2]])
-        faces.extend([[0, 1, 5], [0, 5, 4]])
-        faces.extend([[3, 6, 2], [3, 7, 6]])
-        faces.extend([[0, 4, 7], [0, 7, 3]])
-        faces.extend([[1, 2, 6], [1, 6, 5]])
-        faces.append([4, 5, 8])
-        faces.append([7, 9, 6])
-        faces.extend([[4, 8, 9], [4, 9, 7]])
-        faces.extend([[5, 6, 9], [5, 9, 8]])
-        
-        if point_left:
-            vertices = [[sign_length - v[0], v[1], v[2]] for v in vertices]
-            faces = [[f[2], f[1], f[0]] for f in faces]
+        if arrowed:
+            # Build right-pointing geometry (square end at X=0, pointed end at X=sign_length)
+            vertices.append([0, 0, 0])
+            vertices.append([0, sign_height, 0])
+            vertices.append([0, sign_height, self.sign_thickness])
+            vertices.append([0, 0, self.sign_thickness])
+            
+            body_length = sign_length - point_length
+            vertices.append([body_length, 0, 0])
+            vertices.append([body_length, sign_height, 0])
+            vertices.append([body_length, sign_height, self.sign_thickness])
+            vertices.append([body_length, 0, self.sign_thickness])
+            
+            tip_y = sign_height / 2
+            vertices.append([sign_length, tip_y, 0])
+            vertices.append([sign_length, tip_y, self.sign_thickness])
+            
+            # Define faces for right-pointing geometry
+            faces = []
+            faces.extend([[0, 2, 1], [0, 3, 2]])
+            faces.extend([[0, 1, 5], [0, 5, 4]])
+            faces.extend([[3, 6, 2], [3, 7, 6]])
+            faces.extend([[0, 4, 7], [0, 7, 3]])
+            faces.extend([[1, 2, 6], [1, 6, 5]])
+            faces.append([4, 5, 8])
+            faces.append([7, 9, 6])
+            faces.extend([[4, 8, 9], [4, 9, 7]])
+            faces.extend([[5, 6, 9], [5, 9, 8]])
+            
+            if point_left:
+                vertices = [[sign_length - v[0], v[1], v[2]] for v in vertices]
+                faces = [[f[2], f[1], f[0]] for f in faces]
+        else:
+            sign_base = trimesh.creation.box(
+                extents=[sign_length, sign_height, self.sign_thickness]
+            )
+            sign_base.apply_translation([
+                sign_length / 2,
+                sign_height / 2,
+                self.sign_thickness / 2
+            ])
+            vertices = sign_base.vertices.tolist()
+            faces = sign_base.faces.tolist()
         
         # Create base sign mesh using trimesh for easier text operations
         vertices_array = np.array(vertices)
@@ -1068,13 +1095,12 @@ class DirectionSignGenerator:
         
         # Add indexing hole on the backside (for post pin alignment).
         try:
+            hole_meshes = [self._create_index_hole_for_sign(sign_length, sign_height, point_left)]
             if segment_id is not None:
-                hole_meshes = self._create_id_holes_for_sign(
-                    sign_length, sign_height, point_left, segment_id
+                hole_meshes.extend(
+                    self._create_id_holes_for_sign(sign_length, sign_height, point_left, segment_id)
                 )
-                hole_mesh = trimesh.util.concatenate(hole_meshes)
-            else:
-                hole_mesh = self._create_index_hole_for_sign(sign_length, sign_height, point_left)
+            hole_mesh = trimesh.util.concatenate(hole_meshes)
             new_mesh = sign_base.difference(hole_mesh)
             if new_mesh is not None and len(new_mesh.faces) > 0:
                 sign_base = new_mesh

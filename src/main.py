@@ -82,6 +82,7 @@ def main():
     """Main entry point for generating direction sign STLs."""
     parser = argparse.ArgumentParser(description="Direction Sign Generator")
     parser.add_argument("--config", required=True, help="Path to config JSON file")
+    parser.add_argument("--spacers", type=int, default=0, help="Number of spacer segments to add")
     args = parser.parse_args()
     HOME, LOCATIONS, units, user_agent = load_config(args.config)
 
@@ -125,24 +126,33 @@ def main():
     
     config_basename = os.path.splitext(os.path.basename(args.config))[0]
 
-    # Generate the post with flat surfaces at each bearing
-    # The first (taller) post includes the base with north arrow
-    # Adjust bearings > 180° to keep signs on same side of post (front hemisphere)
-    # Bearings > 180° are in the rear, so subtract 180° to mirror them to the front
-    post_bearings = [loc.bearing if loc.bearing <= 180 else loc.bearing - 180 for loc in LOCATIONS]
+    # Generate segmented posts with fixed home flat on south (180°)
+    post_segments = []
+    post_segments.append({"bearing": 180.0, "segment_id": 1})
+    for i, loc in enumerate(LOCATIONS):
+        bearing = loc.bearing if loc.bearing <= 180 else loc.bearing - 180
+        post_segments.append({"bearing": bearing, "segment_id": i + 2})
+    for _ in range(max(0, args.spacers)):
+        post_segments.append({"spacer": True})
     print(f"\nOriginal bearings: {[f'{loc.bearing:.1f}' for loc in LOCATIONS]}")
-    print(f"Adjusted bearings: {[f'{b:.1f}' for b in post_bearings]}")
+    adjusted_bearings = [f"{s['bearing']:.1f}" for s in post_segments if "bearing" in s]
+    print(f"Adjusted bearings: {adjusted_bearings}")
     post_path = os.path.join(output_dir, f"{config_basename}_post.stl")
-    generator.generate_post(post_bearings, post_path, HOME.latitude, HOME.longitude)
+    generator.generate_post(post_segments, post_path, HOME.latitude, HOME.longitude)
     
     # Generate individual sign plates for each location
     print("\nGenerating sign plates...")
+    home_sign_path = os.path.join(
+        output_dir,
+        f"{config_basename}_sign_1_{HOME.name.replace(' ', '_').replace(',', '')}.stl"
+    )
+    generator.generate_sign(HOME.name, "", home_sign_path, 180.0, segment_id=1, arrowed=False)
     for i, loc in enumerate(LOCATIONS):
-        sign_filename = f"{config_basename}_sign_{i+1}_{loc.name.replace(' ', '_').replace(',', '')}.stl"
+        sign_filename = f"{config_basename}_sign_{i+2}_{loc.name.replace(' ', '_').replace(',', '')}.stl"
         sign_path = os.path.join(output_dir, sign_filename)
         distance_str = format_distance(loc.distance_km, units=units)
         # Pass bearing to determine sign direction
-        generator.generate_sign(loc.name, distance_str, sign_path, loc.bearing, segment_id=i + 1)
+        generator.generate_sign(loc.name, distance_str, sign_path, loc.bearing, segment_id=i + 2)
     
     print("\n" + "=" * 70)
     print("\nGeneration complete!")
