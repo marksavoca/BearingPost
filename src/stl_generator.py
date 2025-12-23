@@ -40,7 +40,7 @@ class DirectionSignGenerator:
                  arrow_length: float = 15.0,
                  arrow_width: float = 8.0,
                  sign_spacing: float = 36.0,
-                 sign_clearance: float = 2.0,
+                 sign_clearance: float = 0.5,
                  max_sign_length: float = 200.0,
                  min_font_size: float = 10.0,
                  max_font_size: float = 20.0,
