@@ -1,90 +1,101 @@
-# Direction Sign Generator
+# BearingPost
 
-A Python project that generates STL files for 3D-printable directional signs based on geographic coordinates.
+BearingPost generates 3D-printable STL parts for a directional sign system based on real-world bearings and distances.
 
 ## Overview
 
-This project creates a directional sign system consisting of:
-- **Post**: A central post with flat surfaces oriented toward each destination
-- **Base**: A base platform with a north arrow indicator
-- **Signs**: Directional sign plates with location names and distances
-- **Arrows**: Arrow pointers to attach to the signs
-
-The sign sits at a "home" location and points directional signs toward real geographic locations based on latitude/longitude coordinates.
+The system consists of:
+- **Base segment**: a compass-style base with raised N/E/S/W and degree ticks, plus an alignment peg.
+- **Post segments**: one segment per sign (plus optional spacers), each with a single flat, alignment features, and magnet pockets.
+- **Topper**: a cap that covers the top peg and includes a magnet pocket.
+- **Signs**: directional sign plates with location names and two-line distance text. A home sign is also generated (no arrow or distance).
 
 ## Project Structure
 
 ```
 direction_sign/
+├── configs/              # JSON configs for locations and styling
 ├── src/
-│   ├── main.py           # Main script with location data
-│   ├── geo_utils.py      # Geographic calculations (bearing, distance)
-│   └── stl_generator.py  # STL file generation
+│   ├── main.py           # CLI entrypoint
+│   ├── geo_utils.py      # Geographic calculations
+│   └── stl_generator.py  # STL generation
 ├── output/               # Generated STL files
 ├── requirements.txt      # Python dependencies
-└── README.md            # This file
+└── README.md
 ```
 
 ## Installation
 
-1. Create a virtual environment (recommended):
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-2. Install dependencies:
-```bash
+source venv/bin/activate  # On Windows: venv\\Scripts\\activate
 pip install -r requirements.txt
 ```
 
 ## Usage
 
-1. Edit `src/main.py` to set your home location and destinations:
-```python
-HOME = Location(
-    name="Home",
-    latitude=40.7128,
-    longitude=-74.0060
-)
+Generate parts from a config file:
 
-LOCATIONS = [
-    Location("Paris", 48.8566, 2.3522),
-    Location("Tokyo", 35.6762, 139.6503),
-    # Add more locations...
-]
-```
-
-2. Run the generator:
 ```bash
-python src/main.py
+python src/main.py --config configs/example.json
 ```
 
-3. Find the generated STL files in the `output/` directory
+Add spacer segments:
 
-## How It Works
+```bash
+python src/main.py --config configs/example.json --spacers 2
+```
 
-1. **Calculate Bearings**: Uses the haversine formula to calculate the bearing (compass direction) from home to each destination
-2. **Calculate Distances**: Computes great circle distances between locations
-3. **Generate Post**: Creates a post with flat mounting surfaces at the calculated bearings
-4. **Generate Signs**: Creates sign plates with location names and distances
-5. **Export STL**: Saves all components as STL files ready for 3D printing
+Emboss coordinates on the base (optional):
 
-## Customization
+```bash
+python src/main.py --config configs/example.json --coords
+```
 
-Adjust dimensions in `stl_generator.py`:
-- `post_height`: Height of the main post (default: 150mm)
-- `post_radius`: Radius of the post (default: 15mm)
-- `sign_width`: Width of directional signs (default: 100mm)
-- `sign_height`: Height of signs (default: 20mm)
+### Config format (JSON)
 
-## Future Enhancements
+Each config provides a home location plus destinations. `name` is used on the sign, `location` is a fuller label for context, and lat/long can be filled in directly (or left for geocoding if enabled in the future).
 
-- [ ] Implement actual STL geometry generation
-- [ ] Add text embossing/debossing on signs
-- [ ] Support for custom fonts
-- [ ] Assembly instructions generator
-- [ ] Multi-level signs for many destinations
+```json
+{
+  "units": "mi",
+  "home": {
+    "name": "Mullica Hill",
+    "location": "Mullica Hill, NJ",
+    "latitude": 39.73059345761767,
+    "longitude": -75.16805997015658,
+    "font": "Arial",
+    "sign_color": "blue",
+    "text_color": "white"
+  },
+  "locations": [
+    {
+      "name": "Albany",
+      "location": "Albany, NY",
+      "latitude": 42.697749760384546,
+      "longitude": -73.96640153872819,
+      "font": "Arial",
+      "sign_color": "blue",
+      "text_color": "white"
+    }
+  ]
+}
+```
+
+## Output
+
+For a config named `example.json`, the generator outputs:
+- `example_post_base_segment.stl`
+- `example_post_segment_1.stl`, `example_post_segment_2.stl`, ...
+- `example_post_topper.stl`
+- `example_sign_1_<HOME>.stl` (home sign, no arrow/distance)
+- `example_sign_2_<LOCATION>.stl`, ...
+
+## Notes
+
+- Segment IDs are encoded using 4 vertical ID pins (1–15). If you exceed 15 segments, the generator falls back to the single center pin/hole for that segment.
+- Magnet pockets are centered and sized for 4×1.5 mm magnets with clearance (glue fit).
+- The base includes a bottom engraving: `Mark W Savoca © <current year>`.
 
 ## License
 
