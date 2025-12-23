@@ -142,7 +142,7 @@ def main():
         sign_path = os.path.join(output_dir, sign_filename)
         distance_str = format_distance(loc.distance_km, units=units)
         # Pass bearing to determine sign direction
-        generator.generate_sign(loc.name, distance_str, sign_path, loc.bearing)
+        generator.generate_sign(loc.name, distance_str, sign_path, loc.bearing, segment_id=i + 1)
     
     print("\n" + "=" * 70)
     print("\nGeneration complete!")

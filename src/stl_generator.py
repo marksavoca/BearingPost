@@ -48,7 +48,12 @@ class DirectionSignGenerator:
                  index_pin_radius: float = 1.0,
                  index_pin_length: float = 2.0,
                  index_pin_clearance: float = 0.2,
-                 index_pin_inset: float = 5.0):
+                 index_pin_inset: float = 5.0,
+                 id_pin_radius: float = 0.7,
+                 id_pin_length: float = 1.5,
+                 id_pin_spacing: float = 3.0,
+                 id_pin_clearance: float = 0.2,
+                 id_pin_inset: float = 2.0):
         """
         Initialize the sign generator with dimensions (all in mm).
         
@@ -79,6 +84,11 @@ class DirectionSignGenerator:
             index_pin_length: Length of indexing pins from flat surface (mm)
             index_pin_clearance: Radial clearance for sign pin hole (mm)
             index_pin_inset: Inset from square end for sign pin hole (mm)
+            id_pin_radius: Radius of ID pins on post flats (mm)
+            id_pin_length: Length of ID pins from flat surface (mm)
+            id_pin_spacing: Spacing between ID pins on the flat (mm)
+            id_pin_clearance: Radial clearance for ID pin holes (mm)
+            id_pin_inset: Inset from square end for ID pin holes (mm)
         """
         self.post_height = post_height
         self.post_radius = post_radius
@@ -106,6 +116,11 @@ class DirectionSignGenerator:
         self.index_pin_length = index_pin_length
         self.index_pin_clearance = index_pin_clearance
         self.index_pin_inset = index_pin_inset
+        self.id_pin_radius = id_pin_radius
+        self.id_pin_length = id_pin_length
+        self.id_pin_spacing = id_pin_spacing
+        self.id_pin_clearance = id_pin_clearance
+        self.id_pin_inset = id_pin_inset
 
     def _rotate_mesh_z(self, target_mesh: trimesh.Trimesh, degrees: float,
                        center: Tuple[float, float, float]) -> None:
@@ -152,6 +167,59 @@ class DirectionSignGenerator:
         y_pos = sign_height / 2
         hole.apply_translation([x_pos, y_pos, hole_depth / 2])
         return hole
+
+    def _create_id_pins_at_bearing(self, bearing: float, sign_height: float,
+                                   post_x_offset: float, post_y_offset: float,
+                                   segment_id: int) -> trimesh.Trimesh:
+        """Create up to 3 ID pins (binary) on the flat spot for a segment ID (1-7)."""
+        if segment_id <= 0 or segment_id > 7:
+            raise ValueError(f"segment_id must be 1-7, got {segment_id}")
+        pin_offsets = [-self.id_pin_spacing, 0.0, self.id_pin_spacing]
+        pin_meshes = []
+        for bit_index, x_offset in enumerate(pin_offsets):
+            if not (segment_id & (1 << bit_index)):
+                continue
+            pin = trimesh.creation.cylinder(
+                radius=self.id_pin_radius,
+                height=self.id_pin_length,
+                sections=24
+            )
+            pin.apply_transform(trimesh.transformations.rotation_matrix(
+                math.radians(90), [1, 0, 0]
+            ))
+            radial_center = self.post_radius - self.flat_depth + (self.id_pin_length / 2)
+            pin.apply_translation([0, radial_center, sign_height + x_offset])
+            rotation_matrix = trimesh.transformations.rotation_matrix(
+                math.radians(-bearing), [0, 0, 1], [0, 0, 0]
+            )
+            pin.apply_transform(rotation_matrix)
+            pin.apply_translation([post_x_offset, post_y_offset, 0])
+            pin_meshes.append(pin)
+        return trimesh.util.concatenate(pin_meshes)
+
+    def _create_id_holes_for_sign(self, sign_length: float, sign_height: float,
+                                  point_left: bool, segment_id: int) -> List[trimesh.Trimesh]:
+        """Create matching ID pin holes on the sign backside."""
+        if segment_id <= 0 or segment_id > 7:
+            raise ValueError(f"segment_id must be 1-7, got {segment_id}")
+        hole_radius = self.id_pin_radius + self.id_pin_clearance
+        hole_depth = min(self.sign_thickness, self.id_pin_length + self.id_pin_clearance)
+        pin_offsets = [-self.id_pin_spacing, 0.0, self.id_pin_spacing]
+        x_base = self.id_pin_inset if not point_left else sign_length - self.id_pin_inset
+        holes = []
+        for bit_index, x_offset in enumerate(pin_offsets):
+            if not (segment_id & (1 << bit_index)):
+                continue
+            hole = trimesh.creation.cylinder(
+                radius=hole_radius,
+                height=hole_depth,
+                sections=24
+            )
+            x_pos = x_base
+            y_pos = sign_height / 2 + x_offset
+            hole.apply_translation([x_pos, y_pos, hole_depth / 2])
+            holes.append(hole)
+        return holes
 
     def _split_distance_text(self, distance_text: str) -> Tuple[str, str]:
         """Split distance into value and units for two-line display."""
@@ -221,7 +289,8 @@ class DirectionSignGenerator:
         # ===== SIGN SEGMENTS =====
         print("  Creating sign segments...")
         for i, bearing in enumerate(bearings):
-            print(f"    Segment {i+1}: bearing {bearing:.1f}°")
+            segment_id = i + 1
+            print(f"    Segment {segment_id}: bearing {bearing:.1f}° (ID {segment_id})")
             segment_mesh = trimesh.creation.cylinder(
                 radius=self.post_radius,
                 height=segment_height,
@@ -239,8 +308,8 @@ class DirectionSignGenerator:
             except Exception as e:
                 print(f"      Warning: Flat boolean failed: {e}")
             
-            pin_mesh = self._create_index_pin_at_bearing(bearing, segment_sign_center, 0, 0)
-            segment_mesh = trimesh.util.concatenate([segment_mesh, pin_mesh])
+            id_pin_mesh = self._create_id_pins_at_bearing(bearing, segment_sign_center, 0, 0, segment_id)
+            segment_mesh = trimesh.util.concatenate([segment_mesh, id_pin_mesh])
             
             socket_mesh = self._create_alignment_socket(0, 0)
             try:
@@ -758,7 +827,8 @@ class DirectionSignGenerator:
         
         return result
     
-    def generate_sign(self, text: str, distance: str, output_path: str, bearing: float = 0.0):
+    def generate_sign(self, text: str, distance: str, output_path: str, bearing: float = 0.0,
+                      segment_id: int | None = None):
         """
         Generate a directional sign plate with text.
         Creates a pointed sign (arrow end) with text embossed on it.
@@ -929,7 +999,13 @@ class DirectionSignGenerator:
         
         # Add indexing hole on the backside (for post pin alignment).
         try:
-            hole_mesh = self._create_index_hole_for_sign(sign_length, sign_height, point_left)
+            if segment_id is not None:
+                hole_meshes = self._create_id_holes_for_sign(
+                    sign_length, sign_height, point_left, segment_id
+                )
+                hole_mesh = trimesh.util.concatenate(hole_meshes)
+            else:
+                hole_mesh = self._create_index_hole_for_sign(sign_length, sign_height, point_left)
             new_mesh = sign_base.difference(hole_mesh)
             if new_mesh is not None and len(new_mesh.faces) > 0:
                 sign_base = new_mesh
