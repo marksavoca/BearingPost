@@ -32,13 +32,13 @@ HOME = Location(
 
 # Destinations to point to
 LOCATIONS = [
-    Location("Albany, NY", 42.697749760384546, -73.96640153872819, font="Arial", color="blue"),
-    Location("Wharton, NJ", 40.89469275367825, -74.57707989642749, font="Arial", color="green"),
-    Location("Stone Harbor, NJ", 39.05421572551508, -74.75888740116326, font="Arial", color="teal"),
-    Location("Rome, Italy", 41.9028, 12.4964, font="Arial", color="red"),
-    Location("Boston, MA", 42.33813538280124, -71.09011637177542, font="Arial", color="maroon"),
-    Location("Philadelphia, PA", 39.93617180632561, -75.16416042623342, font="Arial", color="orange"),
-    Location("Los Angeles, CA", 34.06965322948626, -118.44078368287897, font="Arial", color="purple"),
+    Location("Albany", 42.697749760384546, -73.96640153872819, font="Arial", color="blue"),
+    Location("Wharton", 40.89469275367825, -74.57707989642749, font="Arial", color="green"),
+    Location("Stone Harbor", 39.05421572551508, -74.75888740116326, font="Arial", color="teal"),
+    Location("Rome", 41.9028, 12.4964, font="Arial", color="red"),
+    Location("Boston", 42.33813538280124, -71.09011637177542, font="Arial", color="maroon"),
+    Location("Philadelphia", 39.93617180632561, -75.16416042623342, font="Arial", color="orange"),
+    Location("Los Angeles", 34.06965322948626, -118.44078368287897, font="Arial", color="purple"),
 ]
 
 

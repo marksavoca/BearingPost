@@ -1029,11 +1029,15 @@ class DirectionSignGenerator:
                 # Create main text mesh
                 # Position: near square end (attachment point), vertically centered
                 if point_left:
-                    # Square end is at right, text near right edge
-                    text_x = sign_length * 0.95 - (main_text_width)  # Right-justified, 5% from right edge
+                    # Square end is at right (X=sign_length), text near right edge
+                    # Text starts at: sign_length minus padding minus text_width
+                    padding = 15.0  # 15mm from edge for safety
+                    text_x = sign_length - padding - (main_text_width * 1.1)  # Add 10% safety margin
+                    print(f"  Left-pointing sign: text_x={text_x:.1f}, sign_length={sign_length:.1f}, text_width={main_text_width:.1f}")
                 else:
-                    # Square end is at left, text near left edge
-                    text_x = sign_length * 0.05  # Left-justified, 5% from left edge
+                    # Square end is at left (X=0), text near left edge
+                    padding = 10.0  # 10mm from edge
+                    text_x = padding
                 text_y = (sign_height / 2) - (font_size / 2.8)  # Adjusted for baseline offset
                 text_z = self.sign_thickness
                 
