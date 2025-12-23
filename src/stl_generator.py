@@ -58,7 +58,8 @@ class DirectionSignGenerator:
                  sign_vertical_spacing: float = 8.0,
                  magnet_diameter: float = 4.0,
                  magnet_thickness: float = 1.5,
-                 magnet_clearance: float = 0.2):
+                 magnet_clearance: float = 0.2,
+                 debug: bool = False):
         """
         Initialize the sign generator with dimensions (all in mm).
         
@@ -98,7 +99,10 @@ class DirectionSignGenerator:
             magnet_diameter: Diameter of alignment magnets (mm)
             magnet_thickness: Thickness of alignment magnets (mm)
             magnet_clearance: Radial clearance for magnet pockets (mm)
+            debug: Enable verbose debug output
         """
+        self.debug = debug
+        self._print = print if self.debug else (lambda *args, **kwargs: None)
         self.post_height = post_height
         self.post_radius = post_radius
         self.base_radius = base_radius
@@ -284,7 +288,7 @@ class DirectionSignGenerator:
             home_lat: Home latitude to emboss on base (optional)
             home_lon: Home longitude to emboss on base (optional)
         """
-        print(f"Generating segmented post with {len(bearings)} segments...")
+        self._print(f"Generating segmented post with {len(bearings)} segments...")
         
         # Configuration
         segments = 64
@@ -298,7 +302,7 @@ class DirectionSignGenerator:
         output_base = os.path.splitext(output_path)[0]
         
         # ===== BASE SEGMENT (BASE + POST STUB + PEG) =====
-        print("  Creating base segment...")
+        self._print("  Creating base segment...")
         base_mesh = trimesh.creation.cylinder(
             radius=self.base_radius,
             height=self.base_height,
@@ -334,10 +338,10 @@ class DirectionSignGenerator:
         base_segment = trimesh.util.concatenate(base_meshes)
         base_segment_path = f"{output_base}_base_segment.stl"
         base_segment.export(base_segment_path)
-        print(f"  Saved: {base_segment_path}")
+        self._print(f"  Saved: {base_segment_path}")
         
         # ===== SIGN SEGMENTS =====
-        print("  Creating sign segments...")
+        self._print("  Creating sign segments...")
         for i, entry in enumerate(bearings):
             if isinstance(entry, dict):
                 bearing = entry.get("bearing")
@@ -348,7 +352,7 @@ class DirectionSignGenerator:
                 segment_id = i + 1
                 is_spacer = False
             label = f"{segment_id}" if segment_id is not None else "spacer"
-            print(f"    Segment {i+1}: bearing {bearing} (ID {label})")
+            self._print(f"    Segment {i+1}: bearing {bearing} (ID {label})")
             segment_mesh = trimesh.creation.cylinder(
                 radius=self.post_radius,
                 height=segment_height,
@@ -363,9 +367,9 @@ class DirectionSignGenerator:
                     if new_mesh is not None and len(new_mesh.faces) > 0:
                         segment_mesh = new_mesh
                     else:
-                        print(f"      Warning: Flat boolean returned empty mesh")
+                        self._print(f"      Warning: Flat boolean returned empty mesh")
                 except Exception as e:
-                    print(f"      Warning: Flat boolean failed: {e}")
+                    self._print(f"      Warning: Flat boolean failed: {e}")
                 
                 if segment_id is not None and segment_id <= 15:
                     id_pin_mesh = self._create_id_pins_at_bearing(
@@ -374,7 +378,7 @@ class DirectionSignGenerator:
                     segment_mesh = trimesh.util.concatenate([segment_mesh, id_pin_mesh])
                 else:
                     if segment_id is not None and segment_id > 15:
-                        print(f"      Note: segment_id {segment_id} exceeds 15; using center pin only")
+                        self._print(f"      Note: segment_id {segment_id} exceeds 15; using center pin only")
                     center_pin_mesh = self._create_index_pin_at_bearing(adjusted_bearing, segment_sign_center, 0, 0)
                     segment_mesh = trimesh.util.concatenate([segment_mesh, center_pin_mesh])
             
@@ -384,9 +388,9 @@ class DirectionSignGenerator:
                 if new_mesh is not None and len(new_mesh.faces) > 0:
                     segment_mesh = new_mesh
                 else:
-                    print(f"      Warning: Socket boolean returned empty mesh")
+                    self._print(f"      Warning: Socket boolean returned empty mesh")
             except Exception as e:
-                print(f"      Warning: Socket boolean failed: {e}")
+                self._print(f"      Warning: Socket boolean failed: {e}")
             
             magnet_cutter = self._create_socket_magnet_cutter(0, 0)
             try:
@@ -394,19 +398,19 @@ class DirectionSignGenerator:
                 if new_mesh is not None and len(new_mesh.faces) > 0:
                     segment_mesh = new_mesh
                 else:
-                    print(f"      Warning: Magnet boolean returned empty mesh")
+                    self._print(f"      Warning: Magnet boolean returned empty mesh")
             except Exception as e:
-                print(f"      Warning: Magnet boolean failed: {e}")
+                self._print(f"      Warning: Magnet boolean failed: {e}")
             
             peg_mesh = self._create_alignment_peg(segment_height)
             segment_mesh = trimesh.util.concatenate([segment_mesh, peg_mesh])
             
             segment_path = f"{output_base}_segment_{i+1}.stl"
             segment_mesh.export(segment_path)
-            print(f"      Saved: {segment_path}")
+            self._print(f"      Saved: {segment_path}")
         
         # ===== TOPPER =====
-        print("  Creating post topper...")
+        self._print("  Creating post topper...")
         topper_height = 10.0
         topper_mesh = trimesh.creation.cylinder(
             radius=self.post_radius,
@@ -420,9 +424,9 @@ class DirectionSignGenerator:
             if new_mesh is not None and len(new_mesh.faces) > 0:
                 topper_mesh = new_mesh
             else:
-                print(f"    Warning: Topper socket boolean returned empty mesh")
+                self._print(f"    Warning: Topper socket boolean returned empty mesh")
         except Exception as e:
-            print(f"    Warning: Topper socket boolean failed: {e}")
+            self._print(f"    Warning: Topper socket boolean failed: {e}")
         
         magnet_cutter = self._create_socket_magnet_cutter(0, 0)
         try:
@@ -430,13 +434,13 @@ class DirectionSignGenerator:
             if new_mesh is not None and len(new_mesh.faces) > 0:
                 topper_mesh = new_mesh
             else:
-                print(f"    Warning: Topper magnet boolean returned empty mesh")
+                self._print(f"    Warning: Topper magnet boolean returned empty mesh")
         except Exception as e:
-            print(f"    Warning: Topper magnet boolean failed: {e}")
+            self._print(f"    Warning: Topper magnet boolean failed: {e}")
         
         topper_path = f"{output_base}_topper.stl"
         topper_mesh.export(topper_path)
-        print(f"  Saved: {topper_path}")
+        self._print(f"  Saved: {topper_path}")
     
     def _create_north_arrow(self) -> trimesh.Trimesh:
         """
@@ -567,7 +571,7 @@ class DirectionSignGenerator:
             return []
         
         try:
-            print(f"  Adding coordinates text to base (south side)...")
+            self._print(f"  Adding coordinates text to base (south side)...")
             # Format coordinates to 4 decimal places
             lat_text = f"{latitude:.4f}"
             lon_text = f"{longitude:.4f}"
@@ -591,10 +595,10 @@ class DirectionSignGenerator:
             self._rotate_mesh_z(lat_mesh, self.base_text_rotation_deg, (0, 0, base_z))
             self._rotate_mesh_z(lon_mesh, self.base_text_rotation_deg, (0, 0, base_z))
 
-            print(f"  Coordinates embossed: {lat_text}, {lon_text}")
+            self._print(f"  Coordinates embossed: {lat_text}, {lon_text}")
             return [lat_mesh, lon_mesh]
         except Exception as e:
-            print(f"  Warning: Could not create coordinates text: {e}")
+            self._print(f"  Warning: Could not create coordinates text: {e}")
             return []
     
     def _create_alignment_peg(self, post_height: float) -> trimesh.Trimesh:
@@ -896,7 +900,7 @@ class DirectionSignGenerator:
                         if text_mesh is not None and len(text_mesh.vertices) > 0:
                             meshes.append(text_mesh)
                     except Exception as e:
-                        print(f"      Warning: Could not extrude polygon (area={p.area:.2f}): {e}")
+                        self._print(f"      Warning: Could not extrude polygon (area={p.area:.2f}): {e}")
                         pass
         
         if not meshes:
@@ -927,7 +931,7 @@ class DirectionSignGenerator:
         # Determine if sign should point left (bearing > 180°)
         point_left = bearing > 180.0 if arrowed else False
         direction_note = " (pointing left)" if point_left else " (pointing right)"
-        print(f"Generating sign for '{text}'{direction_note}...")
+        self._print(f"Generating sign for '{text}'{direction_note}...")
         
         # Calculate sign dimensions
         sign_height = self.flat_height - (2 * self.sign_clearance)
@@ -977,7 +981,7 @@ class DirectionSignGenerator:
             return attach_padding + main_text_width + effective_gap + distance_width + tip_padding
 
         required_body_length = compute_required_body_length()
-        print(
+        self._print(
             f"  Layout widths: name={main_text_width:.1f}mm, "
             f"distance={distance_width:.1f}mm, "
             f"required_body={required_body_length:.1f}mm, "
@@ -988,7 +992,7 @@ class DirectionSignGenerator:
             if optimal_length < sign_length:
                 sign_length = max(60.0, optimal_length)
                 body_length = sign_length - point_length
-                print(f"  Note: Reduced sign length to {sign_length:.1f}mm to fit text")
+                self._print(f"  Note: Reduced sign length to {sign_length:.1f}mm to fit text")
         elif required_body_length > body_length:
             # Reduce font size(s) until both texts fit within max length
             while required_body_length > body_length and (font_size > min_main_font or distance_font_size > min_distance_font_size):
@@ -1002,7 +1006,7 @@ class DirectionSignGenerator:
                 main_text_width = main_text_len * font_size * name_width_factor
                 distance_width = compute_distance_width() if has_distance else 0.0
                 required_body_length = compute_required_body_length()
-            print(
+            self._print(
                 f"  Layout after sizing: name={main_text_width:.1f}mm, "
                 f"distance={distance_width:.1f}mm, "
                 f"required_body={required_body_length:.1f}mm, "
@@ -1010,7 +1014,7 @@ class DirectionSignGenerator:
                 f"font={font_size:.1f}mm, dist_font={distance_font_size:.1f}mm"
             )
             if required_body_length > body_length:
-                print(f"  Warning: Text may overlap; name text at minimum size")
+                self._print(f"  Warning: Text may overlap; name text at minimum size")
         
         # Final calculations
         distance_font_size = min(distance_font_size, font_size * 0.65)
@@ -1033,11 +1037,11 @@ class DirectionSignGenerator:
         if required_body_length < body_length:
             sign_length = max(60.0, required_body_length + point_length)
             body_length = sign_length - point_length
-            print(f"  Note: Reduced sign length to {sign_length:.1f}mm to fit text")
+            self._print(f"  Note: Reduced sign length to {sign_length:.1f}mm to fit text")
         
-        print(f"  Sign dimensions: {sign_length:.1f}mm long × {sign_height:.1f}mm tall × {self.sign_thickness:.1f}mm thick")
-        print(f"  Font size: {font_size:.1f}mm")
-        print(f"  Distance font: {distance_font_size:.1f}mm")
+        self._print(f"  Sign dimensions: {sign_length:.1f}mm long × {sign_height:.1f}mm tall × {self.sign_thickness:.1f}mm thick")
+        self._print(f"  Font size: {font_size:.1f}mm")
+        self._print(f"  Distance font: {distance_font_size:.1f}mm")
         
         # Create the basic sign shape (pointed on one end, square on the other)
         # The pointed end will aim toward the location
@@ -1103,24 +1107,24 @@ class DirectionSignGenerator:
                 hole_mesh = trimesh.util.concatenate(hole_meshes)
             else:
                 if segment_id is not None and segment_id > 15:
-                    print(f"  Note: segment_id {segment_id} exceeds 15; using center hole only")
+                    self._print(f"  Note: segment_id {segment_id} exceeds 15; using center hole only")
                 hole_mesh = self._create_index_hole_for_sign(sign_length, sign_height, point_left)
             new_mesh = sign_base.difference(hole_mesh)
             if new_mesh is not None and len(new_mesh.faces) > 0:
                 sign_base = new_mesh
             else:
-                print(f"  Warning: Index hole boolean returned empty mesh")
+                self._print(f"  Warning: Index hole boolean returned empty mesh")
         except Exception as e:
-            print(f"  Warning: Index hole boolean operation failed: {e}")
+            self._print(f"  Warning: Index hole boolean operation failed: {e}")
         
         # Add embossed text using vector-based rendering
         if not FREETYPE_AVAILABLE:
-            print(f"  Warning: freetype-py not installed - text embossing unavailable")
-            print(f"  Install with: pip install freetype-py shapely")
+            self._print(f"  Warning: freetype-py not installed - text embossing unavailable")
+            self._print(f"  Install with: pip install freetype-py shapely")
             sign_mesh = sign_base
         else:
             try:
-                print(f"  Creating high-quality vector text...")
+                self._print(f"  Creating high-quality vector text...")
                 
                 # Create main text mesh
                 # Position: near square end (attachment point), vertically centered
@@ -1161,18 +1165,18 @@ class DirectionSignGenerator:
                 if distance_meshes:
                     meshes.extend(distance_meshes)
                 sign_mesh = trimesh.util.concatenate(meshes)
-                print(f"  Text embossed: '{text}'")
+                self._print(f"  Text embossed: '{text}'")
                 
             except Exception as e:
                 import traceback
-                print(f"  Warning: Could not create vector text: {e}")
-                print(f"  Details: {traceback.format_exc()}")
-                print(f"  Saving blank sign")
+                self._print(f"  Warning: Could not create vector text: {e}")
+                self._print(f"  Details: {traceback.format_exc()}")
+                self._print(f"  Saving blank sign")
                 sign_mesh = sign_base
         
         # Export
         sign_mesh.export(output_path)
-        print(f"  Saved: {output_path}")
+        self._print(f"  Saved: {output_path}")
     
     def generate_arrow(self, output_path: str):
         """
@@ -1182,5 +1186,5 @@ class DirectionSignGenerator:
             output_path: Path to save the STL file
         """
         # TODO: Implement arrow generation
-        print(f"Generating arrow pointer...")
-        print(f"  Output: {output_path}")
+        self._print(f"Generating arrow pointer...")
+        self._print(f"  Output: {output_path}")

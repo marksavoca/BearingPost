@@ -69,6 +69,7 @@ def main():
     parser.add_argument("--config", required=True, help="Path to config JSON file")
     parser.add_argument("--spacers", type=int, default=0, help="Number of spacer segments to add")
     parser.add_argument("--coords", action="store_true", help="Emboss lat/long on base")
+    parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
     args = parser.parse_args()
     HOME, LOCATIONS, units, user_agent = load_config(args.config)
 
@@ -108,7 +109,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     # Initialize the STL generator
-    generator = DirectionSignGenerator()
+    generator = DirectionSignGenerator(debug=args.debug)
     
     config_basename = os.path.splitext(os.path.basename(args.config))[0]
 
