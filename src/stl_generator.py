@@ -299,16 +299,9 @@ class DirectionSignGenerator:
         if home_lat is not None and home_lon is not None:
             coords_meshes = self._create_coordinates_text(home_lat, home_lon)
         
-        base_post_mesh = trimesh.creation.cylinder(
-            radius=self.post_radius,
-            height=base_post_height,
-            sections=segments
-        )
-        base_post_mesh.apply_translation([0, 0, base_post_height / 2])
-        
-        peg_mesh = self._create_alignment_peg(base_post_height)
+        peg_mesh = self._create_alignment_peg(self.base_height)
         compass_meshes = self._create_compass_decorations()
-        base_meshes = [base_mesh, arrow_mesh, base_post_mesh, peg_mesh]
+        base_meshes = [base_mesh, arrow_mesh, peg_mesh]
         if compass_meshes:
             base_meshes.extend(compass_meshes)
         if coords_meshes:
