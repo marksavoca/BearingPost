@@ -7,6 +7,7 @@ import numpy as np
 from stl import mesh
 import math
 import os
+from datetime import datetime
 import trimesh
 
 # Try to import optional text rendering libraries
@@ -148,6 +149,17 @@ class DirectionSignGenerator:
         center_x = (bounds[0][0] + bounds[1][0]) / 2
         center_y = (bounds[0][1] + bounds[1][1]) / 2
         target_mesh.apply_translation([-center_x, -center_y, 0])
+
+    def _create_base_bottom_text_mesh(self, text: str, engraving_depth: float) -> trimesh.Trimesh:
+        """Create mirrored text mesh for bottom engraving."""
+        text_mesh = self._create_text_mesh_vector(text, 6.0, (0, 0, 0))
+        self._center_mesh_xy(text_mesh)
+        # Mirror so the text reads correctly from the bottom.
+        text_mesh.apply_scale([1, -1, 1])
+        # Scale the extrude height to the engraving depth (keep bottom at Z=0).
+        z_scale = engraving_depth / max(self.text_height, 0.01)
+        text_mesh.apply_scale([1, 1, z_scale])
+        return text_mesh
 
     def _create_index_pin_at_bearing(self, bearing: float, sign_height: float,
                                      post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:
@@ -293,6 +305,19 @@ class DirectionSignGenerator:
             sections=segments
         )
         base_mesh.apply_translation([0, 0, self.base_height / 2])
+        
+        # Engrave maker text on the bottom of the base.
+        if FREETYPE_AVAILABLE:
+            year = datetime.now().year
+            maker_text = f"Mark W Savoca © {year}"
+            try:
+                engraving_depth = 0.6
+                text_mesh = self._create_base_bottom_text_mesh(maker_text, engraving_depth)
+                new_mesh = base_mesh.difference(text_mesh)
+                if new_mesh is not None and len(new_mesh.faces) > 0:
+                    base_mesh = new_mesh
+            except Exception:
+                pass
         
         arrow_mesh = self._create_north_arrow()
         coords_meshes = []
