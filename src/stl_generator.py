@@ -217,7 +217,7 @@ class DirectionSignGenerator:
         hole_radius = self.id_pin_radius + self.id_pin_clearance
         hole_depth = min(self.sign_thickness, self.id_pin_length + self.id_pin_clearance)
         pin_offsets = [-self.id_pin_spacing, 0.0, self.id_pin_spacing]
-        x_base = self.id_pin_inset if not point_left else sign_length - self.id_pin_inset
+        x_base = sign_length / 2
         holes = []
         for bit_index, x_offset in enumerate(pin_offsets):
             if not (segment_id & (1 << bit_index)):
@@ -328,13 +328,14 @@ class DirectionSignGenerator:
                 except Exception as e:
                     print(f"      Warning: Flat boolean failed: {e}")
                 
-                center_pin_mesh = self._create_index_pin_at_bearing(bearing, segment_sign_center, 0, 0)
-                segment_mesh = trimesh.util.concatenate([segment_mesh, center_pin_mesh])
                 if segment_id is not None:
                     id_pin_mesh = self._create_id_pins_at_bearing(
                         bearing, segment_sign_center, 0, 0, segment_id
                     )
                     segment_mesh = trimesh.util.concatenate([segment_mesh, id_pin_mesh])
+                else:
+                    center_pin_mesh = self._create_index_pin_at_bearing(bearing, segment_sign_center, 0, 0)
+                    segment_mesh = trimesh.util.concatenate([segment_mesh, center_pin_mesh])
             
             socket_mesh = self._create_alignment_socket(0, 0)
             try:
@@ -1095,12 +1096,13 @@ class DirectionSignGenerator:
         
         # Add indexing hole on the backside (for post pin alignment).
         try:
-            hole_meshes = [self._create_index_hole_for_sign(sign_length, sign_height, point_left)]
             if segment_id is not None:
-                hole_meshes.extend(
-                    self._create_id_holes_for_sign(sign_length, sign_height, point_left, segment_id)
+                hole_meshes = self._create_id_holes_for_sign(
+                    sign_length, sign_height, point_left, segment_id
                 )
-            hole_mesh = trimesh.util.concatenate(hole_meshes)
+                hole_mesh = trimesh.util.concatenate(hole_meshes)
+            else:
+                hole_mesh = self._create_index_hole_for_sign(sign_length, sign_height, point_left)
             new_mesh = sign_base.difference(hole_mesh)
             if new_mesh is not None and len(new_mesh.faces) > 0:
                 sign_base = new_mesh
