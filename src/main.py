@@ -18,6 +18,7 @@ class Location:
     name: str
     latitude: float
     longitude: float
+    location: str = None  # Full location name for lookup/display context
     distance_km: float = None  # Optional: can be calculated or provided
     bearing: float = None  # Bearing in degrees from home (0-360)
     font: str = "Arial"  # Font for the sign text
@@ -33,6 +34,7 @@ def load_config(path: str) -> Tuple[Location, List[Location], str]:
         name=home_cfg["name"],
         latitude=home_cfg["latitude"],
         longitude=home_cfg["longitude"],
+        location=home_cfg.get("location", home_cfg["name"]),
         font=home_cfg.get("font", "Arial"),
         color=home_cfg.get("color", "blue"),
     )
@@ -43,6 +45,7 @@ def load_config(path: str) -> Tuple[Location, List[Location], str]:
                 name=entry["name"],
                 latitude=entry["latitude"],
                 longitude=entry["longitude"],
+                location=entry.get("location", entry["name"]),
                 font=entry.get("font", "Arial"),
                 color=entry.get("color", "blue"),
             )

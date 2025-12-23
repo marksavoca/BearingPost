@@ -1,7 +1,8 @@
 {
   "units": "mi",
   "home": {
-    "name": "711 Green Lane",
+    "name": "Mullica Hill",
+    "location": "Mullica Hill, NJ",
     "latitude": 39.73059345761767,
     "longitude": -75.16805997015658,
     "font": "Arial",
@@ -10,6 +11,7 @@
   "locations": [
     {
       "name": "Albany",
+      "location": "Albany, NY",
       "latitude": 42.697749760384546,
       "longitude": -73.96640153872819,
       "font": "Arial",
@@ -17,6 +19,7 @@
     },
     {
       "name": "Wharton",
+      "location": "Wharton, NJ",
       "latitude": 40.89469275367825,
       "longitude": -74.57707989642749,
       "font": "Arial",
@@ -24,6 +27,7 @@
     },
     {
       "name": "Stone Harbor",
+      "location": "Stone Harbor, NJ",
       "latitude": 39.05421572551508,
       "longitude": -74.75888740116326,
       "font": "Arial",
@@ -31,6 +35,7 @@
     },
     {
       "name": "Rome",
+      "location": "Rome, Italy",
       "latitude": 41.9028,
       "longitude": 12.4964,
       "font": "Arial",
@@ -38,6 +43,7 @@
     },
     {
       "name": "Boston",
+      "location": "Boston, MA",
       "latitude": 42.33813538280124,
       "longitude": -71.09011637177542,
       "font": "Arial",
@@ -45,6 +51,7 @@
     },
     {
       "name": "Philadelphia",
+      "location": "Philadelphia, PA",
       "latitude": 39.93617180632561,
       "longitude": -75.16416042623342,
       "font": "Arial",
@@ -52,6 +59,7 @@
     },
     {
       "name": "Los Angeles",
+      "location": "Los Angeles, CA",
       "latitude": 34.06965322948626,
       "longitude": -118.44078368287897,
       "font": "Arial",
