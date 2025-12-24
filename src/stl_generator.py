@@ -604,7 +604,7 @@ class DirectionSignGenerator:
         if FREETYPE_AVAILABLE:
             font_size = min(self.arrow_length * 0.9, self.base_radius * 0.3)
             z_base = self.base_height - self.boolean_overlap
-            letter_mesh = self._create_text_mesh_vector("N", font_size, (0, 0, z_base))
+            letter_mesh = self._create_text_mesh_vector("N", font_size, (0, 0, z_base), apply_ramp=True)
             self._center_mesh_xy(letter_mesh)
             bounds = letter_mesh.bounds
             letter_height = bounds[1][1] - bounds[0][1]
@@ -664,7 +664,7 @@ class DirectionSignGenerator:
                 angle = math.radians(bearing_deg)
                 x = math.sin(angle) * letter_radius
                 y = math.cos(angle) * letter_radius
-                letter_mesh = self._create_text_mesh_vector(letter, size, (0, 0, z_base))
+                letter_mesh = self._create_text_mesh_vector(letter, size, (0, 0, z_base), apply_ramp=True)
                 self._center_mesh_xy(letter_mesh)
                 letter_mesh.apply_translation([x, y, 0])
                 meshes.append(letter_mesh)
@@ -741,8 +741,8 @@ class DirectionSignGenerator:
             start_x = -total_width / 2
             lat_x = start_x
             lon_x = start_x + lat_width + gap
-            lat_mesh = self._create_text_mesh_vector(lat_text, font_size, (lat_x, y_pos, base_z))
-            lon_mesh = self._create_text_mesh_vector(lon_text, font_size, (lon_x, y_pos, base_z))
+            lat_mesh = self._create_text_mesh_vector(lat_text, font_size, (lat_x, y_pos, base_z), apply_ramp=True)
+            lon_mesh = self._create_text_mesh_vector(lon_text, font_size, (lon_x, y_pos, base_z), apply_ramp=True)
 
             # Rotate both texts another 90° to align with the intended facing direction.
             self._rotate_mesh_z(lat_mesh, self.base_text_rotation_deg, (0, 0, base_z))
@@ -911,7 +911,8 @@ class DirectionSignGenerator:
         
         return box
     
-    def _create_text_mesh_vector(self, text: str, font_size: float, position: Tuple[float, float, float]) -> trimesh.Trimesh:
+    def _create_text_mesh_vector(self, text: str, font_size: float, position: Tuple[float, float, float],
+                                 apply_ramp: bool = False) -> trimesh.Trimesh:
         """
         Create high-quality vector-based 3D text mesh using FreeType.
         
@@ -1065,7 +1066,8 @@ class DirectionSignGenerator:
         
         # Position the text
         result.apply_translation([position[0], position[1], position[2]])
-        self._apply_text_ramp(result, position[2])
+        if apply_ramp:
+            self._apply_text_ramp(result, position[2])
         
         return result
     
