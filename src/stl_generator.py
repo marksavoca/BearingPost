@@ -47,6 +47,7 @@ class DirectionSignGenerator:
                  base_text_radius_factor: float = 0.7,
                  base_text_rotation_deg: float = 90.0,
                  base_segments: int = 128,
+                 base_chamfer: float = 2.0,
                  index_pin_radius: float = 1.0,
                  index_pin_length: float = 2.0,
                  index_pin_clearance: float = 0.2,
@@ -89,6 +90,7 @@ class DirectionSignGenerator:
             base_text_radius_factor: Base radius factor for south-side text placement
             base_text_rotation_deg: Z rotation for base text orientation
             base_segments: Number of segments for base cylinders (smoothness)
+            base_chamfer: Size of the top chamfer on the base (mm)
             index_pin_radius: Radius of indexing pins on post flats (mm)
             index_pin_length: Length of indexing pins from flat surface (mm)
             index_pin_clearance: Radial clearance for sign pin hole (mm)
@@ -132,6 +134,7 @@ class DirectionSignGenerator:
         self.base_text_radius_factor = base_text_radius_factor
         self.base_text_rotation_deg = base_text_rotation_deg
         self.base_segments = base_segments
+        self.base_chamfer = base_chamfer
         self.index_pin_radius = index_pin_radius
         self.index_pin_length = index_pin_length
         self.index_pin_clearance = index_pin_clearance
@@ -173,6 +176,47 @@ class DirectionSignGenerator:
             math.radians(degrees), [0, 0, 1], center
         )
         target_mesh.apply_transform(rotation_matrix)
+
+    def _create_chamfered_base_mesh(self) -> List[trimesh.Trimesh]:
+        """Create base meshes with a top chamfer."""
+        chamfer = max(0.0, min(self.base_chamfer, self.base_height))
+        if chamfer <= 0.0:
+            base = trimesh.creation.cylinder(
+                radius=self.base_radius,
+                height=self.base_height,
+                sections=self.base_segments
+            )
+            base.apply_translation([0, 0, self.base_height / 2])
+            return [base]
+
+        bottom_height = self.base_height - chamfer
+        bottom = trimesh.creation.cylinder(
+            radius=self.base_radius,
+            height=bottom_height,
+            sections=self.base_segments
+        )
+        bottom.apply_translation([0, 0, bottom_height / 2])
+
+        frustum = trimesh.creation.cylinder(
+            radius=self.base_radius,
+            height=chamfer,
+            sections=self.base_segments
+        )
+        z_min = -chamfer / 2
+        z_max = chamfer / 2
+        top_radius = max(self.base_radius - chamfer, 0.1)
+        top_scale = top_radius / self.base_radius
+        vertices = frustum.vertices.copy()
+        for i in range(len(vertices)):
+            z = vertices[i][2]
+            t = (z - z_min) / (z_max - z_min)
+            scale = 1.0 + (top_scale - 1.0) * t
+            vertices[i][0] *= scale
+            vertices[i][1] *= scale
+        frustum.vertices = vertices
+        frustum.apply_translation([0, 0, bottom_height + chamfer / 2])
+
+        return [bottom, frustum]
 
     def _center_mesh_xy(self, target_mesh: trimesh.Trimesh) -> None:
         """Center a mesh in the XY plane, preserving Z."""
@@ -378,12 +422,8 @@ class DirectionSignGenerator:
         
         # ===== BASE SEGMENT (BASE + POST STUB + PEG) =====
         self._print("  Creating base segment...")
-        base_mesh = trimesh.creation.cylinder(
-            radius=self.base_radius,
-            height=self.base_height,
-            sections=base_segments
-        )
-        base_mesh.apply_translation([0, 0, self.base_height / 2])
+        base_meshes = self._create_chamfered_base_mesh()
+        base_mesh = trimesh.util.concatenate(base_meshes)
         
         # Engrave maker text on the bottom of the base.
         if FREETYPE_AVAILABLE:
