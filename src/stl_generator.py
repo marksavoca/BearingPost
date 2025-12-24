@@ -41,6 +41,8 @@ class DirectionSignGenerator:
                  min_font_size: float = 10.0,
                  max_font_size: float = 20.0,
                  text_height: float = 1.0,
+                 text_ramp_height: float = 0.4,
+                 text_ramp_scale: float = 1.15,
                  base_text_font_size: float = 4.5,
                  base_text_height: float = 0.5,
                  base_text_gap: float = 2.0,
@@ -84,6 +86,8 @@ class DirectionSignGenerator:
             min_font_size: Minimum font size for text
             max_font_size: Maximum font size for text
             text_height: Height of embossed text (mm)
+            text_ramp_height: Height of the text ramp blend (mm)
+            text_ramp_scale: XY scale at the text base for ramp blending
             base_text_font_size: Font size for base coordinates text (mm)
             base_text_height: Emboss height for base coordinates (mm)
             base_text_gap: Gap between latitude and longitude text (mm)
@@ -128,6 +132,8 @@ class DirectionSignGenerator:
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
         self.text_height = text_height
+        self.text_ramp_height = text_ramp_height
+        self.text_ramp_scale = text_ramp_scale
         self.base_text_font_size = base_text_font_size
         self.base_text_height = base_text_height
         self.base_text_gap = base_text_gap
@@ -224,6 +230,30 @@ class DirectionSignGenerator:
         center_x = (bounds[0][0] + bounds[1][0]) / 2
         center_y = (bounds[0][1] + bounds[1][1]) / 2
         target_mesh.apply_translation([-center_x, -center_y, 0])
+
+    def _apply_text_ramp(self, text_mesh: trimesh.Trimesh, base_z: float) -> None:
+        """Apply a shallow XY ramp at the base of a text mesh."""
+        ramp_height = min(self.text_ramp_height, self.text_height)
+        if ramp_height <= 0 or self.text_ramp_scale <= 1.0:
+            return
+        bounds = text_mesh.bounds
+        center_x = (bounds[0][0] + bounds[1][0]) / 2
+        center_y = (bounds[0][1] + bounds[1][1]) / 2
+        vertices = text_mesh.vertices.copy()
+        z_min = base_z
+        z_max = base_z + ramp_height
+        for i in range(len(vertices)):
+            z = vertices[i][2]
+            if z <= z_min:
+                scale = self.text_ramp_scale
+            elif z >= z_max:
+                scale = 1.0
+            else:
+                t = (z - z_min) / (z_max - z_min)
+                scale = self.text_ramp_scale - (self.text_ramp_scale - 1.0) * t
+            vertices[i][0] = center_x + (vertices[i][0] - center_x) * scale
+            vertices[i][1] = center_y + (vertices[i][1] - center_y) * scale
+        text_mesh.vertices = vertices
 
     def _union_meshes(self, meshes: List[trimesh.Trimesh]) -> trimesh.Trimesh:
         """Boolean-union meshes into a single solid; fall back to concat on failure."""
@@ -1035,6 +1065,7 @@ class DirectionSignGenerator:
         
         # Position the text
         result.apply_translation([position[0], position[1], position[2]])
+        self._apply_text_ramp(result, position[2])
         
         return result
     
