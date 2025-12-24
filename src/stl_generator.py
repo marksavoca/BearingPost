@@ -1125,6 +1125,8 @@ class DirectionSignGenerator:
         
         # Layout paddings and spacing
         attach_padding = 10.0
+        left_attach_padding = attach_padding + 4.0
+        attach_pad = left_attach_padding if point_left else attach_padding
         tip_padding = 3.0
         base_text_gap = 16.0
         text_gap = max(10.0, base_text_gap - max(0, main_text_len - 6) * 1.2)
@@ -1135,7 +1137,7 @@ class DirectionSignGenerator:
         body_length = sign_length - point_length
 
         def compute_required_body_length() -> float:
-            return attach_padding + main_text_width + effective_gap + distance_width + tip_padding
+            return attach_pad + main_text_width + effective_gap + distance_width + tip_padding
 
         required_body_length = compute_required_body_length()
         self._print(
@@ -1286,9 +1288,9 @@ class DirectionSignGenerator:
                 # Create main text mesh
                 # Position: near square end (attachment point), vertically centered
                 if point_left:
-                    text_x = sign_length - attach_padding - main_text_width
+                    text_x = sign_length - attach_pad - main_text_width
                 else:
-                    text_x = attach_padding
+                    text_x = attach_pad
                 text_y = (sign_height / 2) - (font_size / 2.8)  # Adjusted for baseline offset
                 text_z = self.sign_thickness - self.boolean_overlap
                 
