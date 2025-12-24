@@ -25,7 +25,7 @@ class DirectionSignGenerator:
     
     def __init__(self, 
                  post_height: float = 200.0,
-                 post_radius: float = 8.0,
+                 post_radius: float = 10.0,
                  base_radius: float = 40.0,
                  base_height: float = 10.0,
                  sign_width: float = 100.0,
@@ -56,8 +56,8 @@ class DirectionSignGenerator:
                  id_pin_clearance: float = 0.2,
                  id_pin_inset: float = 2.0,
                  sign_vertical_spacing: float = 8.0,
-                 magnet_diameter: float = 4.0,
-                 magnet_thickness: float = 1.5,
+                 magnet_diameter: float = 6.0,
+                 magnet_thickness: float = 2.0,
                  magnet_clearance: float = 0.2,
                  debug: bool = False):
         """
