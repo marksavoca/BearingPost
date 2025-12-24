@@ -302,10 +302,25 @@ class DirectionSignGenerator:
         except Exception as e:
             self._print(f"    Warning: Could not compute components for {label}: {e}")
 
-    def _create_base_bottom_text_mesh(self, text: str, engraving_depth: float) -> trimesh.Trimesh:
-        """Create mirrored text mesh for bottom engraving."""
-        text_mesh = self._create_text_mesh_vector(text, 6.0, (0, 0, 0))
-        self._center_mesh_xy(text_mesh)
+    def _create_base_bottom_text_mesh(self, text_lines: List[str],
+                                      engraving_depth: float) -> trimesh.Trimesh:
+        """Create mirrored multiline text mesh for bottom engraving."""
+        if not text_lines:
+            raise ValueError("No text lines provided for engraving")
+        font_size = 6.0
+        line_gap = font_size * 0.3
+        line_height = font_size + line_gap
+        total_height = line_height * len(text_lines) - line_gap
+        start_y = total_height / 2 - font_size
+        meshes = []
+        for i, line in enumerate(text_lines):
+            y_pos = start_y - i * line_height
+            line_mesh = self._create_text_mesh_vector(line, font_size, (0, 0, 0))
+            bounds = line_mesh.bounds
+            center_x = (bounds[0][0] + bounds[1][0]) / 2
+            line_mesh.apply_translation([-center_x, y_pos, 0])
+            meshes.append(line_mesh)
+        text_mesh = trimesh.util.concatenate(meshes)
         # Mirror so the text reads correctly from the bottom.
         text_mesh.apply_scale([1, -1, 1])
         # Scale the extrude height to the engraving depth (keep bottom at Z=0).
@@ -458,10 +473,10 @@ class DirectionSignGenerator:
         # Engrave maker text on the bottom of the base.
         if FREETYPE_AVAILABLE:
             year = datetime.now().year
-            maker_text = f"Mark W Savoca © {year}"
+            maker_lines = ["Mark W Savoca", f"© {year}"]
             try:
                 engraving_depth = 0.6
-                text_mesh = self._create_base_bottom_text_mesh(maker_text, engraving_depth)
+                text_mesh = self._create_base_bottom_text_mesh(maker_lines, engraving_depth)
                 new_mesh = base_mesh.difference(text_mesh)
                 if new_mesh is not None and len(new_mesh.faces) > 0:
                     base_mesh = new_mesh
