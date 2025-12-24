@@ -59,6 +59,7 @@ class DirectionSignGenerator:
                  magnet_diameter: float = 6.0,
                  magnet_thickness: float = 2.0,
                  magnet_clearance: float = 0.2,
+                 peg_clearance: float = 0.1,
                  debug: bool = False):
         """
         Initialize the sign generator with dimensions (all in mm).
@@ -99,6 +100,7 @@ class DirectionSignGenerator:
             magnet_diameter: Diameter of alignment magnets (mm)
             magnet_thickness: Thickness of alignment magnets (mm)
             magnet_clearance: Radial clearance for magnet pockets (mm)
+            peg_clearance: Radial clearance for peg/socket and key slot (mm)
             debug: Enable verbose debug output
         """
         self.debug = debug
@@ -140,6 +142,7 @@ class DirectionSignGenerator:
         self.magnet_diameter = magnet_diameter
         self.magnet_thickness = magnet_thickness
         self.magnet_clearance = magnet_clearance
+        self.peg_clearance = peg_clearance
 
     def _get_boolean_engine(self) -> str | None:
         available = getattr(trimesh.boolean, "engines_available", set())
@@ -745,11 +748,11 @@ class DirectionSignGenerator:
         """
         # Socket dimensions (slightly larger than peg for clearance) - scale with post radius
         peg_radius = self.post_radius * 0.5
-        socket_radius = peg_radius + 0.3   # 0.3mm radial clearance
+        socket_radius = peg_radius + self.peg_clearance
         join_max_height = max(0.0, (self.sign_vertical_spacing / 2) - self.sign_clearance)
         socket_depth = min(8.5, join_max_height)
-        key_width = self.post_radius * 0.3 + 0.3       # 0.3mm clearance
-        key_depth = self.post_radius * 0.15 + 0.3       # 0.3mm clearance
+        key_width = self.post_radius * 0.3 + self.peg_clearance
+        key_depth = self.post_radius * 0.15 + self.peg_clearance
         
         # Create main cylindrical socket
         socket = trimesh.creation.cylinder(
