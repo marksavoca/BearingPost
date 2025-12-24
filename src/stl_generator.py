@@ -26,7 +26,7 @@ class DirectionSignGenerator:
     def __init__(self, 
                  post_height: float = 200.0,
                  post_radius: float = 10.0,
-                 base_radius: float = 40.0,
+                 base_radius: float = 50.0,
                  base_height: float = 10.0,
                  sign_width: float = 100.0,
                  sign_height: float = 20.0,
@@ -46,6 +46,7 @@ class DirectionSignGenerator:
                  base_text_gap: float = 2.0,
                  base_text_radius_factor: float = 0.7,
                  base_text_rotation_deg: float = 90.0,
+                 base_segments: int = 128,
                  index_pin_radius: float = 1.0,
                  index_pin_length: float = 2.0,
                  index_pin_clearance: float = 0.2,
@@ -87,6 +88,7 @@ class DirectionSignGenerator:
             base_text_gap: Gap between latitude and longitude text (mm)
             base_text_radius_factor: Base radius factor for south-side text placement
             base_text_rotation_deg: Z rotation for base text orientation
+            base_segments: Number of segments for base cylinders (smoothness)
             index_pin_radius: Radius of indexing pins on post flats (mm)
             index_pin_length: Length of indexing pins from flat surface (mm)
             index_pin_clearance: Radial clearance for sign pin hole (mm)
@@ -129,6 +131,7 @@ class DirectionSignGenerator:
         self.base_text_gap = base_text_gap
         self.base_text_radius_factor = base_text_radius_factor
         self.base_text_rotation_deg = base_text_rotation_deg
+        self.base_segments = base_segments
         self.index_pin_radius = index_pin_radius
         self.index_pin_length = index_pin_length
         self.index_pin_clearance = index_pin_clearance
@@ -363,6 +366,7 @@ class DirectionSignGenerator:
         
         # Configuration
         segments = 64
+        base_segments = self.base_segments
         sign_vertical_spacing = self.sign_vertical_spacing
         base_sign_offset = 40.0
         sign_gap_half = sign_vertical_spacing / 2
@@ -377,7 +381,7 @@ class DirectionSignGenerator:
         base_mesh = trimesh.creation.cylinder(
             radius=self.base_radius,
             height=self.base_height,
-            sections=segments
+            sections=base_segments
         )
         base_mesh.apply_translation([0, 0, self.base_height / 2])
         
@@ -600,8 +604,8 @@ class DirectionSignGenerator:
         outer_radius = self.base_radius * 0.9
         inner_radius = self.base_radius * 0.85
         try:
-            outer = trimesh.creation.cylinder(radius=outer_radius, height=ring_height, sections=96)
-            inner = trimesh.creation.cylinder(radius=inner_radius, height=ring_height, sections=96)
+            outer = trimesh.creation.cylinder(radius=outer_radius, height=ring_height, sections=self.base_segments)
+            inner = trimesh.creation.cylinder(radius=inner_radius, height=ring_height, sections=self.base_segments)
             z_center = self.base_height - self.boolean_overlap + ring_height / 2
             outer.apply_translation([0, 0, z_center])
             inner.apply_translation([0, 0, z_center])
@@ -696,7 +700,7 @@ class DirectionSignGenerator:
         join_max_height = max(0.0, (self.sign_vertical_spacing / 2) - self.sign_clearance)
         peg_height = min(8.0, join_max_height)
         key_width = self.post_radius * 0.3  # 30% of post radius (2.4mm for 8mm post)
-        key_depth = self.post_radius * 0.15  # 15% of post radius (1.2mm for 8mm post)
+        key_depth = self.post_radius * 0.1  # 10% of post radius (shallower key)
         
         # Create main cylindrical peg (overlap slightly with the post for union).
         z_base = post_height - self.boolean_overlap
@@ -752,7 +756,7 @@ class DirectionSignGenerator:
         join_max_height = max(0.0, (self.sign_vertical_spacing / 2) - self.sign_clearance)
         socket_depth = min(8.5, join_max_height)
         key_width = self.post_radius * 0.3 + self.peg_clearance
-        key_depth = self.post_radius * 0.15 + self.peg_clearance
+        key_depth = self.post_radius * 0.1 + self.peg_clearance
         
         # Create main cylindrical socket
         socket = trimesh.creation.cylinder(
