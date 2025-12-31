@@ -24,7 +24,7 @@ class DirectionSignGenerator:
     """Generates 3D models for direction signs."""
     
     def __init__(self, 
-                 post_height: float = 180.0,
+                 post_height: float = 150.0,
                  post_radius: float = 10.0,
                  base_radius: float = 50.0,
                  base_height: float = 10.0,
@@ -121,7 +121,7 @@ class DirectionSignGenerator:
         self._print = print if self.debug else (lambda *args, **kwargs: None)
         self.boolean_overlap = 0.1
         self._warned_no_boolean_engine = False
-        self.post_height = min(post_height, 180.0)
+        self.post_height = min(post_height, 150.0)
         self.post_radius = post_radius
         self.base_radius = base_radius
         self.base_height = base_height
@@ -473,20 +473,23 @@ class DirectionSignGenerator:
         entries = list(bearings)
 
         def max_slots_per_post(post_height: float) -> int:
-            usable = post_height - self.sign_vertical_spacing - self.flat_height
-            if usable <= 0:
-                return 1
-            return max(1, int(math.floor(usable / segment_height) + 1))
+            if post_height <= 0:
+                return 0
+            return max(1, int(math.floor(post_height / segment_height)))
 
         upper_capacity = max_slots_per_post(self.post_height)
         split_index = min(len(entries), upper_capacity)
         upper_entries = entries[:split_index]
         lower_entries = entries[split_index:]
 
-        def slot_centers(post_height: float, count: int) -> List[float]:
+        def slot_centers(post_height: float, count: int, anchor: str) -> List[float]:
             if count <= 0:
                 return []
-            top_center = post_height - sign_gap_half - (self.flat_height / 2)
+            half_segment = segment_height / 2
+            if anchor == "bottom":
+                centers = [half_segment + i * segment_height for i in range(count)]
+                return list(reversed(centers))
+            top_center = post_height - half_segment
             return [top_center - i * segment_height for i in range(count)]
 
         def build_post(entries: List, post_height: float, base_index: int,
@@ -498,7 +501,8 @@ class DirectionSignGenerator:
             )
             post_mesh.apply_translation([0, 0, post_height / 2])
             add_meshes = []
-            centers = slot_centers(post_height, len(entries))
+            anchor = "bottom" if cut_join_holes else "top"
+            centers = slot_centers(post_height, len(entries), anchor)
             for i, (entry, sign_center) in enumerate(zip(entries, centers)):
                 if isinstance(entry, dict):
                     bearing = entry.get("bearing")
