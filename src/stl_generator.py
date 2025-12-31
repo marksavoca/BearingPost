@@ -24,7 +24,7 @@ class DirectionSignGenerator:
     """Generates 3D models for direction signs."""
     
     def __init__(self, 
-                 post_height: float = 200.0,
+                 post_height: float = 180.0,
                  post_radius: float = 10.0,
                  base_radius: float = 50.0,
                  base_height: float = 10.0,
@@ -64,6 +64,9 @@ class DirectionSignGenerator:
                  magnet_thickness: float = 2.0,
                  magnet_clearance: float = 0.2,
                  peg_clearance: float = 0.1,
+                 join_pin_radius: float = 1.2,
+                 join_pin_length: float = 4.0,
+                 join_pin_clearance: float = 0.2,
                  debug: bool = False):
         """
         Initialize the sign generator with dimensions (all in mm).
@@ -109,13 +112,16 @@ class DirectionSignGenerator:
             magnet_thickness: Thickness of alignment magnets (mm)
             magnet_clearance: Radial clearance for magnet pockets (mm)
             peg_clearance: Radial clearance for peg/socket and key slot (mm)
+            join_pin_radius: Radius of post-to-post alignment pins (mm)
+            join_pin_length: Length of post-to-post alignment pins (mm)
+            join_pin_clearance: Radial clearance for post-to-post pin holes (mm)
             debug: Enable verbose debug output
         """
         self.debug = debug
         self._print = print if self.debug else (lambda *args, **kwargs: None)
         self.boolean_overlap = 0.1
         self._warned_no_boolean_engine = False
-        self.post_height = post_height
+        self.post_height = min(post_height, 180.0)
         self.post_radius = post_radius
         self.base_radius = base_radius
         self.base_height = base_height
@@ -155,6 +161,9 @@ class DirectionSignGenerator:
         self.magnet_thickness = magnet_thickness
         self.magnet_clearance = magnet_clearance
         self.peg_clearance = peg_clearance
+        self.join_pin_radius = join_pin_radius
+        self.join_pin_length = join_pin_length
+        self.join_pin_clearance = join_pin_clearance
 
     def _get_boolean_engine(self) -> str | None:
         available = getattr(trimesh.boolean, "engines_available", set())
@@ -440,10 +449,10 @@ class DirectionSignGenerator:
     
     def generate_post(self, bearings: List, output_path: str, home_lat: float = None, home_lon: float = None):
         """
-        Generate a base segment plus one post segment per sign, and a topper cap.
-        Each sign segment has a single flat indent centered with half-gap above/below.
-        The base segment includes the base and a post stub with an alignment peg.
-        Each sign segment has a bottom alignment socket and a top alignment peg.
+        Generate a two-part post with flats for signs, splitting the signs across the
+        two post parts from top to bottom. The first sign is at the very top of the
+        upper post; remaining signs continue down the upper post, then restart at
+        the top of the lower post. The two post parts include alignment pins for glue-up.
         
         Args:
             bearings: List of bearings (in degrees) where signs will attach, ordered top to bottom
@@ -451,25 +460,107 @@ class DirectionSignGenerator:
             home_lat: Home latitude to emboss on base (optional)
             home_lon: Home longitude to emboss on base (optional)
         """
-        self._print(f"Generating segmented post with {len(bearings)} segments...")
+        self._print(f"Generating two-part post with {len(bearings)} sign slots...")
         
         # Configuration
         segments = 64
-        base_segments = self.base_segments
         sign_vertical_spacing = self.sign_vertical_spacing
-        base_sign_offset = 40.0
         sign_gap_half = sign_vertical_spacing / 2
         segment_height = self.flat_height + sign_vertical_spacing
-        segment_sign_center = sign_gap_half + self.flat_height / 2
-        base_post_height = max(0.0, base_sign_offset - segment_sign_center)
         
         output_base = os.path.splitext(output_path)[0]
-        
-        # ===== BASE SEGMENT (BASE + POST STUB + PEG) =====
-        self._print("  Creating base segment...")
+
+        entries = list(bearings)
+
+        def max_slots_per_post(post_height: float) -> int:
+            usable = post_height - self.sign_vertical_spacing - self.flat_height
+            if usable <= 0:
+                return 1
+            return max(1, int(math.floor(usable / segment_height) + 1))
+
+        upper_capacity = max_slots_per_post(self.post_height)
+        split_index = min(len(entries), upper_capacity)
+        upper_entries = entries[:split_index]
+        lower_entries = entries[split_index:]
+
+        def slot_centers(post_height: float, count: int) -> List[float]:
+            if count <= 0:
+                return []
+            top_center = post_height - sign_gap_half - (self.flat_height / 2)
+            return [top_center - i * segment_height for i in range(count)]
+
+        def build_post(entries: List, post_height: float, base_index: int,
+                       add_join_pins: bool, cut_join_holes: bool) -> trimesh.Trimesh:
+            post_mesh = trimesh.creation.cylinder(
+                radius=self.post_radius,
+                height=post_height,
+                sections=segments
+            )
+            post_mesh.apply_translation([0, 0, post_height / 2])
+            add_meshes = []
+            centers = slot_centers(post_height, len(entries))
+            for i, (entry, sign_center) in enumerate(zip(entries, centers)):
+                if isinstance(entry, dict):
+                    bearing = entry.get("bearing")
+                    segment_id = entry.get("segment_id")
+                    is_spacer = entry.get("spacer", False)
+                else:
+                    bearing = entry
+                    segment_id = base_index + i + 1
+                    is_spacer = False
+                label = f"{segment_id}" if segment_id is not None else "spacer"
+                self._print(f"    Slot {i+1}: bearing {bearing} (ID {label})")
+                if is_spacer or bearing is None:
+                    continue
+                adjusted_bearing = (bearing + 90.0) % 360.0
+                box_mesh = self._create_box_mesh_at_bearing(adjusted_bearing, sign_center, 0, 0)
+                try:
+                    new_mesh = post_mesh.difference(box_mesh)
+                    if new_mesh is not None and len(new_mesh.faces) > 0:
+                        post_mesh = new_mesh
+                    else:
+                        self._print("      Warning: Flat boolean returned empty mesh")
+                except Exception as e:
+                    self._print(f"      Warning: Flat boolean failed: {e}")
+
+                if segment_id is not None and segment_id <= 15:
+                    id_pin_mesh = self._create_id_pins_at_bearing(
+                        adjusted_bearing, sign_center, 0, 0, segment_id
+                    )
+                    add_meshes.append(id_pin_mesh)
+                else:
+                    if segment_id is not None and segment_id > 15:
+                        self._print(f"      Note: segment_id {segment_id} exceeds 15; using center pin only")
+                    center_pin_mesh = self._create_index_pin_at_bearing(adjusted_bearing, sign_center, 0, 0)
+                    add_meshes.append(center_pin_mesh)
+
+            if cut_join_holes:
+                join_holes = self._create_post_join_pin_holes()
+                try:
+                    new_mesh = post_mesh.difference(join_holes)
+                    if new_mesh is not None and len(new_mesh.faces) > 0:
+                        post_mesh = new_mesh
+                    else:
+                        self._print("      Warning: Join pin holes returned empty mesh")
+                except Exception as e:
+                    self._print(f"      Warning: Join pin holes failed: {e}")
+
+            if add_join_pins:
+                add_meshes.append(self._create_post_join_pins(post_height))
+
+            if add_meshes:
+                post_mesh = self._union_meshes([post_mesh] + add_meshes)
+            return post_mesh
+
+        post_height = max(self.post_height, segment_height)
+        upper_height = post_height
+        lower_height = post_height
+
+        # ===== LOWER POST (BASE + POST) =====
+        self._print("  Creating lower post...")
         base_meshes = self._create_chamfered_base_mesh()
         base_mesh = trimesh.util.concatenate(base_meshes)
-        
+
         # Engrave maker text on the bottom of the base.
         if FREETYPE_AVAILABLE:
             year = datetime.now().year
@@ -482,131 +573,34 @@ class DirectionSignGenerator:
                     base_mesh = new_mesh
             except Exception:
                 pass
-        
+
         arrow_mesh = self._create_north_arrow()
         coords_meshes = []
         if home_lat is not None and home_lon is not None:
             coords_meshes = self._create_coordinates_text(home_lat, home_lon)
-        
-        peg_mesh = self._create_alignment_peg(self.base_height)
         compass_meshes = self._create_compass_decorations()
-        base_meshes = [base_mesh, arrow_mesh, peg_mesh]
+
+        lower_post = build_post(lower_entries, lower_height, split_index, add_join_pins=True, cut_join_holes=False)
+        lower_post.apply_translation([0, 0, self.base_height])
+
+        lower_meshes = [base_mesh, arrow_mesh, lower_post]
         if compass_meshes:
-            base_meshes.extend(compass_meshes)
+            lower_meshes.extend(compass_meshes)
         if coords_meshes:
-            base_meshes.extend(coords_meshes)
-        base_segment = self._union_meshes(base_meshes)
-        self._log_components(base_segment, "base segment")
-        base_segment_path = f"{output_base}_base_segment.stl"
-        base_segment.export(base_segment_path)
-        self._print(f"  Saved: {base_segment_path}")
-        
-        # ===== SIGN SEGMENTS =====
-        self._print("  Creating sign segments...")
-        for i, entry in enumerate(bearings):
-            if isinstance(entry, dict):
-                bearing = entry.get("bearing")
-                segment_id = entry.get("segment_id")
-                is_spacer = entry.get("spacer", False)
-            else:
-                bearing = entry
-                segment_id = i + 1
-                is_spacer = False
-            label = f"{segment_id}" if segment_id is not None else "spacer"
-            self._print(f"    Segment {i+1}: bearing {bearing} (ID {label})")
-            segment_mesh = trimesh.creation.cylinder(
-                radius=self.post_radius,
-                height=segment_height,
-                sections=segments
-            )
-            segment_mesh.apply_translation([0, 0, segment_height / 2])
-            add_meshes = []
-            if not is_spacer and bearing is not None:
-                adjusted_bearing = (bearing + 90.0) % 360.0
-                box_mesh = self._create_box_mesh_at_bearing(adjusted_bearing, segment_sign_center, 0, 0)
-                try:
-                    new_mesh = segment_mesh.difference(box_mesh)
-                    if new_mesh is not None and len(new_mesh.faces) > 0:
-                        segment_mesh = new_mesh
-                    else:
-                        self._print(f"      Warning: Flat boolean returned empty mesh")
-                except Exception as e:
-                    self._print(f"      Warning: Flat boolean failed: {e}")
-                
-                if segment_id is not None and segment_id <= 15:
-                    id_pin_mesh = self._create_id_pins_at_bearing(
-                        adjusted_bearing, segment_sign_center, 0, 0, segment_id
-                    )
-                    add_meshes.append(id_pin_mesh)
-                else:
-                    if segment_id is not None and segment_id > 15:
-                        self._print(f"      Note: segment_id {segment_id} exceeds 15; using center pin only")
-                    center_pin_mesh = self._create_index_pin_at_bearing(adjusted_bearing, segment_sign_center, 0, 0)
-                    add_meshes.append(center_pin_mesh)
-            
-            socket_mesh = self._create_alignment_socket(0, 0)
-            try:
-                new_mesh = segment_mesh.difference(socket_mesh)
-                if new_mesh is not None and len(new_mesh.faces) > 0:
-                    segment_mesh = new_mesh
-                else:
-                    self._print(f"      Warning: Socket boolean returned empty mesh")
-            except Exception as e:
-                self._print(f"      Warning: Socket boolean failed: {e}")
-            
-            magnet_cutter = self._create_socket_magnet_cutter(0, 0)
-            try:
-                new_mesh = segment_mesh.difference(magnet_cutter)
-                if new_mesh is not None and len(new_mesh.faces) > 0:
-                    segment_mesh = new_mesh
-                else:
-                    self._print(f"      Warning: Magnet boolean returned empty mesh")
-            except Exception as e:
-                self._print(f"      Warning: Magnet boolean failed: {e}")
-            
-            peg_mesh = self._create_alignment_peg(segment_height)
-            add_meshes.append(peg_mesh)
-            if add_meshes:
-                segment_mesh = self._union_meshes([segment_mesh] + add_meshes)
-            self._log_components(segment_mesh, f"segment {i+1}")
-            
-            segment_path = f"{output_base}_segment_{i+1}.stl"
-            segment_mesh.export(segment_path)
-            self._print(f"      Saved: {segment_path}")
-        
-        # ===== TOPPER =====
-        self._print("  Creating post topper...")
-        topper_height = 10.0
-        topper_mesh = trimesh.creation.cylinder(
-            radius=self.post_radius,
-            height=topper_height,
-            sections=segments
-        )
-        topper_mesh.apply_translation([0, 0, topper_height / 2])
-        socket_mesh = self._create_alignment_socket(0, 0)
-        try:
-            new_mesh = topper_mesh.difference(socket_mesh)
-            if new_mesh is not None and len(new_mesh.faces) > 0:
-                topper_mesh = new_mesh
-            else:
-                self._print(f"    Warning: Topper socket boolean returned empty mesh")
-        except Exception as e:
-            self._print(f"    Warning: Topper socket boolean failed: {e}")
-        
-        magnet_cutter = self._create_socket_magnet_cutter(0, 0)
-        try:
-            new_mesh = topper_mesh.difference(magnet_cutter)
-            if new_mesh is not None and len(new_mesh.faces) > 0:
-                topper_mesh = new_mesh
-            else:
-                self._print(f"    Warning: Topper magnet boolean returned empty mesh")
-        except Exception as e:
-            self._print(f"    Warning: Topper magnet boolean failed: {e}")
-        
-        topper_path = f"{output_base}_topper.stl"
-        self._log_components(topper_mesh, "topper")
-        topper_mesh.export(topper_path)
-        self._print(f"  Saved: {topper_path}")
+            lower_meshes.extend(coords_meshes)
+        lower_segment = self._union_meshes(lower_meshes)
+        self._log_components(lower_segment, "lower post")
+        lower_path = f"{output_base}_post_lower.stl"
+        lower_segment.export(lower_path)
+        self._print(f"  Saved: {lower_path}")
+
+        # ===== UPPER POST =====
+        self._print("  Creating upper post...")
+        upper_post = build_post(upper_entries, upper_height, 0, add_join_pins=False, cut_join_holes=True)
+        self._log_components(upper_post, "upper post")
+        upper_path = f"{output_base}_post_upper.stl"
+        upper_post.export(upper_path)
+        self._print(f"  Saved: {upper_path}")
     
     def _create_north_arrow(self) -> trimesh.Trimesh:
         """
@@ -882,6 +876,44 @@ class DirectionSignGenerator:
             socket_depth + (magnet_depth / 2)
         ])
         return magnet
+
+    def _get_post_join_pin_offsets(self) -> List[Tuple[float, float]]:
+        """Return two asymmetric XY offsets for post join pins."""
+        primary = self.post_radius * 0.45
+        secondary = self.post_radius * 0.28
+        return [
+            (primary, 0.0),
+            (-secondary, -primary * 0.6),
+        ]
+
+    def _create_post_join_pins(self, post_height: float) -> trimesh.Trimesh:
+        """Create alignment pins on the top of a post segment for glue-up."""
+        z_base = post_height - self.boolean_overlap
+        pins = []
+        for x, y in self._get_post_join_pin_offsets():
+            pin = trimesh.creation.cylinder(
+                radius=self.join_pin_radius,
+                height=self.join_pin_length,
+                sections=24
+            )
+            pin.apply_translation([x, y, z_base + self.join_pin_length / 2])
+            pins.append(pin)
+        return trimesh.util.concatenate(pins)
+
+    def _create_post_join_pin_holes(self) -> trimesh.Trimesh:
+        """Create matching holes for post join pins."""
+        hole_radius = self.join_pin_radius + self.join_pin_clearance
+        hole_depth = self.join_pin_length + self.join_pin_clearance
+        holes = []
+        for x, y in self._get_post_join_pin_offsets():
+            hole = trimesh.creation.cylinder(
+                radius=hole_radius,
+                height=hole_depth,
+                sections=24
+            )
+            hole.apply_translation([x, y, hole_depth / 2])
+            holes.append(hole)
+        return trimesh.util.concatenate(holes)
     
     def _create_box_mesh_at_bearing(self, bearing: float, sign_height: float,
                                     post_x_offset: float, post_y_offset: float) -> trimesh.Trimesh:

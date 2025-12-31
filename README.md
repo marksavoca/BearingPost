@@ -91,16 +91,15 @@ Each config provides a home location plus destinations. `name` is used on the si
 ## Output
 
 For a config named `example.json`, the generator outputs:
-- `example_post_base_segment.stl`
-- `example_post_segment_1.stl`, `example_post_segment_2.stl`, ...
-- `example_post_topper.stl`
+- `example_post_lower.stl` (base + lower post)
+- `example_post_upper.stl` (upper post)
 - `example_sign_1_<HOME>.stl` (home sign, no arrow/distance)
 - `example_sign_2_<LOCATION>.stl`, ...
 
 ## Notes
 
 - Segment IDs are encoded using 4 vertical ID pins (1–15). If you exceed 15 segments, the generator falls back to the single center pin/hole for that segment.
-- Magnet pockets are centered and sized for 4×1.5 mm magnets with clearance (glue fit).
+- The two post parts align using two asymmetrical glue pins for orientation.
 - The base includes a bottom engraving: `Mark W Savoca © <current year>`.
 - The generator requires the manifold boolean engine for clean unions.
 
